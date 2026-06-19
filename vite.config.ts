@@ -20,7 +20,7 @@ export default defineConfig({
       // WITHOUT 'outbox' here every outbox.subscribe is silently dropped and the
       // feed never fetches. (Found via the feed-intent e2e: supports('outbox')
       // was true shell-side but the router was never reached — missing capability.)
-      requires: ['identity', 'relay', 'ifc', 'outbox', 'storage', 'resource'],
+      requires: ['identity', 'relay', 'inc', 'outbox', 'storage', 'resource', 'theme'],
       artifactMode: 'single-file',
       archetypes: [{ slug: 'feed', naps: ['feed'] }],
     }),
