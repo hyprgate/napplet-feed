@@ -20,7 +20,7 @@ This document describes how to publish the hyprgate Feed napp as an nsite on nos
 ## Section 1: Prerequisites
 
 1. **Node.js 18+** installed (`node --version`)
-2. **Napp built** — produces `napps/feed/dist/`:
+2. **Napp built** — produces `napplets/feed/dist/`:
    ```bash
    pnpm --filter @hyprgate/napp-feed build
    ```
@@ -60,7 +60,7 @@ per file. Each event maps the file path (`d` tag) to its SHA-256 hash (`x` tag).
 ### Command
 
 ```bash
-# Run from napps/feed/ directory (where .nsite/config.json lives)
+# Run from napplets/feed/ directory (where .nsite/config.json lives)
 # Step 1: Create symlink so nsite-cli can find the config
 ln -sf config.json .nsite/project.json
 # Step 2: Upload
@@ -198,7 +198,7 @@ When Feed napp source changes, re-publish:
 pnpm --filter @hyprgate/napp-feed build
 
 # 2. Re-upload (nsite-cli publishes replaceable events — same d tag supersedes old events)
-cd napps/feed && ln -sf config.json .nsite/project.json && npx nsite-cli@0.1.16 upload ./dist
+cd napplets/feed && ln -sf config.json .nsite/project.json && npx nsite-cli@0.1.16 upload ./dist
 
 # 3. If index.html hash changed, republish the kind 37348 event with the new url tag
 #    (copy the command from Section 3 with the updated sha256)

@@ -1,4 +1,4 @@
-// napps/feed/src/lib/feed-store.test.ts
+// napplets/feed/src/lib/feed-store.test.ts
 // Unit tests for createFeedStore factory.
 // Mocks @napplet/sdk relay helpers instead of pool/eventStore.
 //

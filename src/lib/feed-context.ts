@@ -1,4 +1,4 @@
-// napps/feed/src/lib/feed-context.ts
+// napplets/feed/src/lib/feed-context.ts
 // The shared FeedContext (mutable store state + tracking) plus small pure
 // helpers used across the feed engine modules.
 

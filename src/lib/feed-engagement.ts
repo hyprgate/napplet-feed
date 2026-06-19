@@ -1,4 +1,4 @@
-// napps/feed/src/lib/feed-engagement.ts
+// napplets/feed/src/lib/feed-engagement.ts
 // Engagement aggregation (reactions / comments / zaps) for the feed timeline.
 // Operates on the shared FeedContext.
 

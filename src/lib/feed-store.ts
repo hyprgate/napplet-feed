@@ -1,4 +1,4 @@
-// napps/feed/src/lib/feed-store.ts
+// napplets/feed/src/lib/feed-store.ts
 // Feed state management — pure TypeScript, no Svelte runes.
 // Keep this as .ts (not .svelte.ts) so vitest can import without Svelte compiler.
 //

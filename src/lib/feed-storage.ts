@@ -1,4 +1,4 @@
-// napps/feed/src/lib/feed-storage.ts
+// napplets/feed/src/lib/feed-storage.ts
 // The ONE place that decides instance (per-window) vs shared (cross-window)
 // storage for the feed napplet (Phase 88, FEED-05).
 //

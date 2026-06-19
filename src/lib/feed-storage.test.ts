@@ -1,4 +1,4 @@
-// napps/feed/src/lib/feed-storage.test.ts
+// napplets/feed/src/lib/feed-storage.test.ts
 // Unit tests for the feed-storage wrapper (Phase 88, FEED-05).
 //
 // The wrapper centralizes the instance-vs-shared storage decision:

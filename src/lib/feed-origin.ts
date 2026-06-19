@@ -1,4 +1,4 @@
-// napps/feed/src/lib/feed-origin.ts
+// napplets/feed/src/lib/feed-origin.ts
 // The single origin-routing seam for the feed (Phase 88, FEED-02).
 //
 // subscribeForPayload turns a FeedIntentPayload into ONE subscription, routing

@@ -1,4 +1,4 @@
-// napps/feed/src/lib/feed-engine.ts
+// napplets/feed/src/lib/feed-engine.ts
 // Stateful feed logic, split out of feed-store's factory so neither the file
 // nor createFeedStore grows unbounded. All functions operate on an explicit
 // FeedContext (the store's mutable state + tracking), keeping them
