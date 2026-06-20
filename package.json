@@ -16,7 +16,7 @@
     "@contextvm/sdk": "^0.7.4",
     "@humanspeak/svelte-markdown": "^1.0.5",
     "@hyprgate/types": "workspace:*",
-    "@hyprgate/ui": "workspace:*",
+    "@hyprgate/napplet-ui": "workspace:*",
     "@hyprgate/utils": "workspace:*",
     "@napplet/sdk": "^0.13.0",
     "@napplet/shim": "^0.14.0",

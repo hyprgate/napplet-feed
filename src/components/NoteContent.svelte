@@ -1,9 +1,9 @@
 <script lang="ts">
-  // Thin adapter over the shared @hyprgate/ui note renderer — supplies feed's
+  // Thin adapter over the shared @hyprgate/napplet-ui note renderer — supplies feed's
   // navigation wiring (open a profile via inter-pane message).
   import { inc as ipc } from '@napplet/sdk';
   import { isCanonicalHexPubkey } from '@hyprgate/utils';
-  import NoteContent from '@hyprgate/ui/NoteContent.svelte';
+  import NoteContent from '@hyprgate/napplet-ui/NoteContent.svelte';
 
   interface Props {
     content: string;
