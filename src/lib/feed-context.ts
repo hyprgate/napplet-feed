@@ -3,7 +3,7 @@
 // helpers used across the feed engine modules.
 
 import type { FeedIntentPayload, NostrEvent } from '@hyprgate/types';
-import type { ReactionGroup } from '@hyprgate/utils';
+import { customEmojiForShortcodeContent, type ReactionGroup } from '@hyprgate/utils';
 import type { Subscription } from '@napplet/sdk';
 import type { FeedLoadIntent } from './feed-load-strategy.js';
 import type { FeedState } from './feed-store.js';
@@ -101,12 +101,11 @@ export function normalizeReactionContent(content: string): string {
 }
 
 export function getCustomEmoji(content: string, tags: string[][]): Pick<ReactionGroup, 'imageUrl' | 'shortcode'> {
-  const shortcode = /^:([A-Za-z0-9_-]+):$/.exec(content)?.[1];
-  if (!shortcode) return {};
-  const emojiTag = tags.find((tag) => tag[0] === 'emoji' && tag[1] === shortcode && typeof tag[2] === 'string');
+  const emoji = customEmojiForShortcodeContent(content, tags);
+  if (!emoji) return {};
   return {
-    shortcode,
-    ...(emojiTag?.[2] ? { imageUrl: emojiTag[2] } : {}),
+    shortcode: emoji.shortcode,
+    ...(emoji.imageUrl ? { imageUrl: emoji.imageUrl } : {}),
   };
 }
 
