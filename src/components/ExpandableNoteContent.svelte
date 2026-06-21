@@ -9,6 +9,7 @@
 
   interface Props {
     content: string;
+    emojiTags?: string[][];
     maxChars?: number;
     maxLines?: number;
     profileLabel?: (pubkey: string) => string;
@@ -16,6 +17,7 @@
 
   let {
     content,
+    emojiTags = [],
     maxChars = DEFAULT_NOTE_TRUNCATE_CHARS,
     maxLines = DEFAULT_NOTE_TRUNCATE_LINES,
     profileLabel,
@@ -27,7 +29,7 @@
 </script>
 
 <div class="expandable-note-content">
-  <NoteContent content={visibleContent} {profileLabel} />
+  <NoteContent content={visibleContent} {emojiTags} {profileLabel} />
   {#if isTruncated}
     <button
       type="button"

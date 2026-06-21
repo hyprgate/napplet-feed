@@ -7,10 +7,11 @@
 
   interface Props {
     content: string;
+    emojiTags?: string[][];
     profileLabel?: (pubkey: string) => string;
   }
 
-  let { content, profileLabel }: Props = $props();
+  let { content, emojiTags = [], profileLabel }: Props = $props();
 
   function openProfile(pubkey: string): void {
     if (!isCanonicalHexPubkey(pubkey)) return;
@@ -18,4 +19,4 @@
   }
 </script>
 
-<NoteContent {content} {profileLabel} onProfileClick={openProfile} videoTitle="Feed video" />
+<NoteContent {content} {emojiTags} {profileLabel} onProfileClick={openProfile} videoTitle="Feed video" />

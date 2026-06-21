@@ -123,7 +123,7 @@
 
     <!-- Note content -->
     <div class="text-text-primary text-sm leading-relaxed">
-      <ExpandableNoteContent content={event.content} {profileLabel} />
+      <ExpandableNoteContent content={event.content} emojiTags={event.tags} {profileLabel} />
       <FeedEmbeds content={event.content} />
       <NoteActions {event} {reactionOptions} />
     </div>
