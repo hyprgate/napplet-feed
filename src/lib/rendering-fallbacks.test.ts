@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { KIND_REPOST, type NostrEvent } from '@hyprgate/types';
 import {
   isFeedRenderableEvent,
+  isInlineDepthExhausted,
   parsedRepostEvent,
   repostTargetId,
   terminalEventContent,
@@ -58,5 +59,11 @@ describe('feed rendering fallback helpers', () => {
     expect(isFeedRenderableEvent(event({ kind: 1111 }))).toBe(true);
     expect(isFeedRenderableEvent(event({ kind: KIND_REPOST }))).toBe(true);
     expect(isFeedRenderableEvent(event({ kind: 1063 }))).toBe(false);
+  });
+
+  it('enforces a deterministic inline note recursion depth limit', () => {
+    expect(isInlineDepthExhausted(0, 2)).toBe(false);
+    expect(isInlineDepthExhausted(1, 2)).toBe(false);
+    expect(isInlineDepthExhausted(2, 2)).toBe(true);
   });
 });

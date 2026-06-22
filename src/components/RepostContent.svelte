@@ -1,21 +1,29 @@
 <script lang="ts">
   import type { NostrEvent } from '@hyprgate/types';
   import EventEmbed from './EventEmbed.svelte';
-  import { parsedRepostEvent, repostTargetId } from '../lib/rendering-fallbacks';
+  import { MAX_INLINE_EVENT_DEPTH, parsedRepostEvent, repostTargetId } from '../lib/rendering-fallbacks';
 
   interface Props {
     event: NostrEvent;
+    profileLabel?: (pubkey: string) => string;
+    depth?: number;
+    maxDepth?: number;
   }
 
-  let { event }: Props = $props();
+  let {
+    event,
+    profileLabel = (pubkey: string) => `${pubkey.slice(0, 12)}...`,
+    depth = 0,
+    maxDepth = MAX_INLINE_EVENT_DEPTH,
+  }: Props = $props();
   let embedded = $derived(parsedRepostEvent(event));
   let targetId = $derived(embedded?.id ?? repostTargetId(event));
 </script>
 
 {#if embedded}
-  <EventEmbed id={embedded.id} event={embedded} label="repost" />
+  <EventEmbed id={embedded.id} event={embedded} label="repost" {profileLabel} depth={depth + 1} {maxDepth} />
 {:else if targetId}
-  <EventEmbed id={targetId} label="repost" />
+  <EventEmbed id={targetId} label="repost" {profileLabel} depth={depth + 1} {maxDepth} />
 {:else}
   <div class="repost-empty">Repost target unavailable</div>
 {/if}

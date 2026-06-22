@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 import type { NostrEvent } from '@hyprgate/types';
 import { inc, relay } from '@napplet/sdk';
+import { nip19 } from 'nostr-tools';
 import FeedProfileHydrationHarness from './__fixtures__/FeedProfileHydrationHarness.svelte';
+import EventEmbed from './EventEmbed.svelte';
 import NoteActions from './NoteActions.svelte';
 import NoteEntry from './NoteEntry.svelte';
 import { NOTE_VIEWER_OPEN_TOPIC } from '../lib/feed-actions';
@@ -91,9 +93,48 @@ describe('feed action click wiring', () => {
     });
     await tick();
 
-    expect(document.body.textContent).toContain('cannot render this event');
+    expect(document.body.textContent).toContain('cannot render this event (kind 1063)');
     expect(document.body.textContent).not.toContain('"id"');
     expect(document.body.textContent).not.toContain('"sig"');
+  });
+
+  it('renders nested note references inline until the depth limit, then stops', async () => {
+    const nestedId = 'd'.repeat(64);
+    const root = {
+      ...EMBEDDED_REPOST_TARGET,
+      id: 'e'.repeat(64),
+      content: `root note nostr:${nip19.noteEncode(nestedId)}`,
+    };
+
+    mount(EventEmbed, {
+      target: document.body,
+      props: {
+        id: root.id,
+        event: root,
+        maxDepth: 0,
+        profileLabel: (pubkey: string) => `profile:${pubkey.slice(0, 4)}`,
+      },
+    });
+    await tick();
+
+    expect(document.body.textContent).toContain('root note');
+    expect(document.querySelector('[data-feed-inline-depth-limit]')?.textContent).toContain('Nested note limit reached.');
+    expect(document.body.textContent).not.toContain('"sig"');
+  });
+
+  it('uses a note-specific fallback when an embedded note cannot be resolved', async () => {
+    vi.mocked(relay.subscribe).mockImplementation((_filters, _onEvent, onEose) => {
+      onEose?.();
+      return { close: vi.fn() };
+    });
+
+    mount(EventEmbed, {
+      target: document.body,
+      props: { id: 'f'.repeat(64) },
+    });
+    await tick();
+
+    expect(document.body.textContent).toContain('cannot render note');
   });
 
   it('renders deduped NIP-89 handler buttons for unsupported events', async () => {
