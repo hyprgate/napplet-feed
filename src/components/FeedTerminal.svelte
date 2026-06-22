@@ -9,6 +9,7 @@
     type FeedLoadIntent,
   } from '../lib/feed-load-strategy';
   import { previewContent, replyContextForEvent, shouldTruncateContent, terminalEngagementLabel } from '../lib/note-presentation';
+  import { terminalEventContent } from '../lib/rendering-fallbacks';
   import ReplyContextLink from './ReplyContextLink.svelte';
 
   interface ProfileContent {
@@ -50,6 +51,11 @@
 
   function terminalContent(content: string): string {
     return shouldTruncateContent(content, 240, 4) ? previewContent(content, 240, 4) : content;
+  }
+
+  function eventContent(event: NostrEvent): string {
+    const content = terminalEventContent(event);
+    return terminalContent(content);
   }
 
   // Sentinel element for IntersectionObserver
@@ -112,7 +118,7 @@
         <span> [{replyContext.label}: <ReplyContextLink reference={replyContext.parent} />{#if replyContext.root} / root <ReplyContextLink reference={replyContext.root} />{/if}]</span>
       {/if}
       <span> [{terminalEngagementLabel(counts)}]</span>
-      <span> {terminalContent(event.content)}</span>
+      <span> {eventContent(event)}</span>
     </div>
   {/each}
   <div bind:this={sentinel} class="h-4"></div>
