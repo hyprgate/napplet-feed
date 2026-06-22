@@ -119,10 +119,10 @@ function removeTimelineEvent(ctx: FeedContext, eventId: string): boolean {
   return true;
 }
 
-function commitTimelineChange(ctx: FeedContext): void {
+function commitTimelineChange(ctx: FeedContext, options: { syncEngagement?: boolean } = {}): void {
   recomputeOldestTimestamp(ctx);
   ctx.notify();
-  syncEngagementSubscription(ctx);
+  if (options.syncEngagement ?? true) syncEngagementSubscription(ctx);
 }
 
 function addToTimeline(ctx: FeedContext, event: NostrEvent): boolean {
@@ -159,7 +159,7 @@ function applyTimelinePageSelection(
     }
   }
 
-  if (changed) commitTimelineChange(ctx);
+  if (changed) commitTimelineChange(ctx, { syncEngagement: false });
 }
 
 function commitPageCursor(
@@ -195,6 +195,7 @@ function finalizeTimelinePage(
   ctx.timelinePageInFlight = false;
   ctx.state.loading = false;
   ctx.notify();
+  syncEngagementSubscription(ctx);
   const pendingIntent = ctx.pendingLoadMoreIntent;
   ctx.pendingLoadMoreIntent = null;
   if (pendingIntent && ctx.state.canLoadMore) startLoadMorePage(ctx, pendingIntent);

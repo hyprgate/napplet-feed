@@ -13,9 +13,7 @@
   import type { EmojiOption } from '../lib/emoji-sets';
   import { replyContextForEvent } from '../lib/note-presentation';
   import EngagementPills from './EngagementPills.svelte';
-  import ExpandableNoteContent from './ExpandableNoteContent.svelte';
-  import FeedEmbeds from './FeedEmbeds.svelte';
-  import NoteActions from './NoteActions.svelte';
+  import FeedEventContent from './FeedEventContent.svelte';
   import ReplyContextLink from './ReplyContextLink.svelte';
 
   interface ProfileContent {
@@ -161,9 +159,7 @@
       {/if}
       <!-- Content -->
       <div class="text-text-primary text-sm leading-relaxed">
-        <ExpandableNoteContent content={event.content} emojiTags={event.tags} {profileLabel} />
-        <FeedEmbeds content={event.content} />
-        <NoteActions {event} {reactionOptions} />
+        <FeedEventContent {event} {reactionOptions} {profileLabel} />
       </div>
     </div>
   {/each}

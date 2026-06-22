@@ -80,6 +80,13 @@ function makeZapReceipt(id: string, targetId: string, amountMillisats: number, t
   ], '');
 }
 
+function engagementSubscribeCalls() {
+  return mockSubscribe.mock.calls.filter((call) => {
+    const filters = call[0] as Array<{ '#e'?: string[] }>;
+    return filters[0]?.['#e'] !== undefined;
+  });
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('createFeedStore', () => {
@@ -710,6 +717,44 @@ describe('createFeedStore', () => {
       { kinds: [1111], '#E': ['note1'] },
       { kinds: [9735], '#e': ['note1'] },
     ]);
+  });
+
+  it('coalesces historical page engagement subscription until page completion', async () => {
+    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEose: (() => void) | null = null;
+
+    mockSubscribe.mockImplementation(
+      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+        const filter = (filters as Array<{ kinds?: number[]; since?: number; '#e'?: string[] }>)[0];
+        if (
+          !capturedTimelineOnEvent
+          && filter?.since === undefined
+          && filter?.['#e'] === undefined
+          && filter?.kinds?.includes(1)
+        ) {
+          capturedTimelineOnEvent = onEvent;
+          capturedTimelineOnEose = onEose;
+        }
+        return { close: mockCloseFn };
+      },
+    );
+
+    const store = createFeedStore();
+    store.switchSource('global');
+    await flush();
+
+    for (let index = 0; index < 50; index++) {
+      capturedTimelineOnEvent!(makeEvent(`note-${index}`, 2000 - index));
+    }
+
+    expect(engagementSubscribeCalls()).toHaveLength(0);
+
+    capturedTimelineOnEose!();
+
+    const calls = engagementSubscribeCalls();
+    expect(calls).toHaveLength(1);
+    const filters = calls[0]![0] as Array<{ '#e'?: string[] }>;
+    expect(filters[0]?.['#e']).toHaveLength(50);
   });
 
   it('subscribes to reply-capable timeline kinds while hiding replies by default', async () => {

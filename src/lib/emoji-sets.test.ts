@@ -111,6 +111,43 @@ describe('emoji set store', () => {
     }));
   });
 
+  it('publishes emoji sets without replacing existing preferred emoji or set refs', async () => {
+    let onEvent: ((event: NostrEvent) => void) | null = null;
+    vi.mocked(relay.subscribe).mockImplementation((_filters, eventCallback) => {
+      onEvent = eventCallback as (event: NostrEvent) => void;
+      return { close: vi.fn() };
+    });
+    const store = createEmojiSetStore();
+    store.init(PUBKEY);
+    await Promise.resolve();
+    onEvent!(makeEvent({
+      id: 'preferred',
+      kind: KIND_USER_EMOJI_LIST,
+      tags: [
+        ['emoji', '😀'],
+        ['a', `${KIND_EMOJI_SET}:${PUBKEY}:old-pack`],
+        ['emoji', 'oldcat', 'https://emoji.example/oldcat.png', `${KIND_EMOJI_SET}:${PUBKEY}:old-pack`],
+      ],
+    }));
+
+    await store.publishEmojiSet({
+      identifier: 'cats',
+      title: 'Cats',
+      rows: [{ shortcode: 'blobcat', url: 'https://emoji.example/blobcat.png' }],
+    });
+
+    expect(relay.publish).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      kind: KIND_USER_EMOJI_LIST,
+      tags: [
+        ['emoji', '😀'],
+        ['a', `${KIND_EMOJI_SET}:${PUBKEY}:old-pack`],
+        ['emoji', 'oldcat', 'https://emoji.example/oldcat.png', `${KIND_EMOJI_SET}:${PUBKEY}:old-pack`],
+        ['a', `${KIND_EMOJI_SET}:${PUBKEY}:cats`],
+        ['emoji', 'blobcat', 'https://emoji.example/blobcat.png', `${KIND_EMOJI_SET}:${PUBKEY}:cats`],
+      ],
+    }));
+  });
+
   it('shows standard unicode emoji from a kind 10030 list (two-element emoji tags)', () => {
     let onEvent: ((event: NostrEvent) => void) | null = null;
     let onEose: (() => void) | null = null;

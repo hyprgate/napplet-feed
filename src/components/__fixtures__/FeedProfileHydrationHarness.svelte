@@ -36,6 +36,10 @@
   export function hydrate(profile: ProfileContent): void {
     profiles = new Map(profiles).set(authorPubkey, profile);
   }
+
+  export function setEvents(nextEvents: NostrEvent[]): void {
+    events = nextEvents;
+  }
 </script>
 
 {#if view === 'compact'}
