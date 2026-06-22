@@ -83,7 +83,7 @@
 </script>
 
 <div class="unsupported-event" data-feed-unsupported-kind={event.kind}>
-  <p>cannot render this event</p>
+  <p>cannot render this event (kind {event.kind})</p>
   {#if actions.length > 0}
     <div class="handler-actions" aria-label="Application handlers">
       {#each actions as action (action.identity)}

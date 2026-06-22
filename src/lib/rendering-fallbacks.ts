@@ -6,6 +6,7 @@ import {
 import { previewContent } from './note-presentation';
 
 export const KIND_COMMENT = 1111;
+export const MAX_INLINE_EVENT_DEPTH = 2;
 
 export function isFeedRenderableEvent(event: NostrEvent): boolean {
   return event.kind === KIND_NOTE || event.kind === KIND_COMMENT || event.kind === KIND_REPOST;
@@ -56,6 +57,10 @@ export function terminalEventContent(event: NostrEvent): string {
   }
   if (!isFeedRenderableEvent(event)) return 'cannot render this event';
   return event.content;
+}
+
+export function isInlineDepthExhausted(depth: number, maxDepth = MAX_INLINE_EVENT_DEPTH): boolean {
+  return depth >= maxDepth;
 }
 
 function isStringTag(value: unknown): value is string[] {
