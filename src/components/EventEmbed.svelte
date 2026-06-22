@@ -8,11 +8,15 @@
 
   interface Props {
     id: string;
+    event?: NostrEvent | null;
+    label?: string;
   }
 
-  let { id }: Props = $props();
-  let event = $state<NostrEvent | null>(null);
-  let status = $state<'loading' | 'ready' | 'empty' | 'error'>('loading');
+  let { id, event: providedEvent = null, label = 'quoted note' }: Props = $props();
+  let fetchedEvent = $state<NostrEvent | null>(null);
+  let fetchStatus = $state<'loading' | 'ready' | 'empty' | 'error'>('loading');
+  let event = $derived(providedEvent ?? fetchedEvent);
+  let status = $derived(providedEvent ? 'ready' : fetchStatus);
 
   function openNote(): void {
     const payload = createNoteViewerOpenPayload({
@@ -33,23 +37,23 @@
       subscription = relay.subscribe(
         [{ ids: [id], limit: 1 }],
         (next: NostrEvent) => {
-          event = next;
+          fetchedEvent = next;
           sawEvent = true;
-          status = 'ready';
+          fetchStatus = 'ready';
         },
         () => {
-          if (!sawEvent) status = 'empty';
+          if (!sawEvent) fetchStatus = 'empty';
         },
       );
     } catch {
-      status = 'error';
+      fetchStatus = 'error';
     }
     return () => subscription?.close();
   });
 </script>
 
 <button type="button" class="event-embed" onclick={openNote}>
-  <span class="label">quoted note</span>
+  <span class="label">{label}</span>
   {#if status === 'loading'}
     <span class="body muted">Loading note...</span>
   {:else if status === 'error'}
