@@ -3,7 +3,7 @@
   import { nip19 } from 'nostr-tools';
   import type { NostrEvent } from 'applesauce-core/helpers/event';
   import { inc as ipc } from '@napplet/sdk';
-  import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle, resourceImage } from '@hyprgate/utils';
+  import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
   import type { EngagementCounts } from '../lib/feed-store';
   import type { EmojiOption } from '../lib/emoji-sets';
   import type { ProfileContent } from '../lib/profile-metadata';

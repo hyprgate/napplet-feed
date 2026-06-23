@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { NostrEvent } from '@hyprgate/types';
-  import { resourceImage } from '@hyprgate/utils';
+  import { resourceImageBatch as resourceImage } from '@hyprgate/utils';
   import { inc as ipc } from '@napplet/sdk';
   import {
     NOTE_VIEWER_OPEN_TOPIC,

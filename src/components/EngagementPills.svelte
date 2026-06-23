@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { formatMillisatsAsSats, resourceImage } from '@hyprgate/utils';
+  import { formatMillisatsAsSats, resourceImageBatch as resourceImage } from '@hyprgate/utils';
   import type { NostrEvent } from '@hyprgate/types';
   import { publishReaction } from '../lib/feed-actions';
   import { countLabel } from '../lib/note-presentation';

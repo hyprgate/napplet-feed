@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { requestRuntimePlayback, resourceImage, resolveExternalVideoEmbed } from '@hyprgate/utils';
+  import { requestRuntimePlayback, resourceImageBatch as resourceImage, resolveExternalVideoEmbed } from '@hyprgate/utils';
 
   interface Props {
     source: string;

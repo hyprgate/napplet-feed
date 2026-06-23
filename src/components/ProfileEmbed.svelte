@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { inc as ipc } from '@napplet/sdk';
-  import { pubkeyColorStyle, resourceImage } from '@hyprgate/utils';
+  import { pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
   import { nip19 } from 'nostr-tools';
   import { subscribeProfileMetadata, type ProfileContent } from '../lib/profile-metadata';
 

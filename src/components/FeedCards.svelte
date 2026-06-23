@@ -3,7 +3,7 @@
   import { format } from 'timeago.js';
   import { nip19 } from 'nostr-tools';
   import { inc as ipc } from '@napplet/sdk';
-  import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle, resourceImage } from '@hyprgate/utils';
+  import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
   import type { EngagementCounts } from '../lib/feed-store';
   import {
     FEED_LOAD_THRESHOLDS,
