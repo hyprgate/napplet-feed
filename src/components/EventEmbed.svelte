@@ -10,11 +10,13 @@
   import FeedEmbeds from './FeedEmbeds.svelte';
   import RepostContent from './RepostContent.svelte';
   import UnsupportedEventFallback from './UnsupportedEventFallback.svelte';
+  import type { ProfileContent } from '../lib/profile-metadata';
 
   interface Props {
     id: string;
     event?: NostrEvent | null;
     label?: string;
+    profiles?: Map<string, ProfileContent>;
     profileLabel?: (pubkey: string) => string;
     depth?: number;
     maxDepth?: number;
@@ -24,6 +26,7 @@
     id,
     event: providedEvent = null,
     label = 'quoted note',
+    profiles = new Map<string, ProfileContent>(),
     profileLabel = (pubkey: string) => `${pubkey.slice(0, 12)}...`,
     depth = 0,
     maxDepth = MAX_INLINE_EVENT_DEPTH,
@@ -77,11 +80,11 @@
   {:else if event}
     <div class="embed-body">
       {#if event.kind === KIND_REPOST}
-        <RepostContent {event} {profileLabel} {depth} {maxDepth} />
+        <RepostContent {event} {profiles} {profileLabel} {depth} {maxDepth} />
       {:else if isFeedRenderableEvent(event)}
         <ExpandableNoteContent content={event.content} emojiTags={event.tags} {profileLabel} />
         {#if canRenderNestedEvents}
-          <FeedEmbeds content={event.content} {profileLabel} {depth} {maxDepth} />
+          <FeedEmbeds content={event.content} {profiles} {profileLabel} {depth} {maxDepth} />
         {:else}
           <div class="depth-limit" data-feed-inline-depth-limit>Nested note limit reached.</div>
         {/if}

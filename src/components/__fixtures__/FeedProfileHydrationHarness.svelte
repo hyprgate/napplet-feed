@@ -2,15 +2,10 @@
   import type { NostrEvent } from '@hyprgate/types';
   import type { EngagementCounts } from '../lib/feed-store';
   import type { EmojiOption } from '../lib/emoji-sets';
+  import type { ProfileContent } from '../../lib/profile-metadata';
   import FeedCards from '../FeedCards.svelte';
   import FeedList from '../FeedList.svelte';
   import FeedTerminal from '../FeedTerminal.svelte';
-
-  interface ProfileContent {
-    name?: string;
-    display_name?: string;
-    picture?: string;
-  }
 
   const authorPubkey = 'f'.repeat(64);
   const event: NostrEvent = {
@@ -35,6 +30,10 @@
 
   export function hydrate(profile: ProfileContent): void {
     profiles = new Map(profiles).set(authorPubkey, profile);
+  }
+
+  export function hydratePubkey(pubkey: string, profile: ProfileContent): void {
+    profiles = new Map(profiles).set(pubkey, profile);
   }
 
   export function setEvents(nextEvents: NostrEvent[]): void {

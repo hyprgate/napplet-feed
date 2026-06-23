@@ -11,16 +11,12 @@
     type FeedLoadIntent,
   } from '../lib/feed-load-strategy';
   import type { EmojiOption } from '../lib/emoji-sets';
+  import { createEngagementVisibilityTracker } from '../lib/feed-visible-targets';
+  import type { ProfileContent } from '../lib/profile-metadata';
   import { replyContextForEvent } from '../lib/note-presentation';
   import EngagementPills from './EngagementPills.svelte';
   import FeedEventContent from './FeedEventContent.svelte';
   import ReplyContextLink from './ReplyContextLink.svelte';
-
-  interface ProfileContent {
-    name?: string;
-    display_name?: string;
-    picture?: string;
-  }
 
   interface Props {
     events: NostrEvent[];
@@ -30,9 +26,18 @@
     loading: boolean;
     canLoadMore: boolean;
     onLoadMore?: (intent?: FeedLoadIntent) => void;
+    onVisibleEventsChange?: (ids: string[]) => void;
   }
 
-  let { events, profiles, engagement, reactionOptions, canLoadMore, onLoadMore }: Props = $props();
+  let {
+    events,
+    profiles,
+    engagement,
+    reactionOptions,
+    canLoadMore,
+    onLoadMore,
+    onVisibleEventsChange,
+  }: Props = $props();
 
   function shortenPubkey(pubkey: string): string {
     try {
@@ -60,6 +65,11 @@
   let scroller: HTMLDivElement | undefined = $state(undefined);
   let sentinel: HTMLDivElement | undefined = $state(undefined);
   let hoveredCardId = $state<string | null>(null);
+  const trackEngagementVisibility = createEngagementVisibilityTracker(
+    () => scroller,
+    () => events,
+    () => onVisibleEventsChange,
+  );
 
   function maybeLoadMore(intent: FeedLoadIntent = 'prefetch'): void {
     if (!canLoadMore) return;
@@ -105,6 +115,7 @@
     {@const replyContext = replyContextForEvent(event)}
     <div
       class="border border-border-dim rounded p-3 mb-2 bg-bg-surface hover:bg-bg-overlay transition-colors"
+      use:trackEngagementVisibility={event.id}
       onpointerenter={() => (hoveredCardId = event.id)}
       onpointerleave={() => { if (hoveredCardId === event.id) hoveredCardId = null; }}
     >
@@ -159,7 +170,7 @@
       {/if}
       <!-- Content -->
       <div class="text-text-primary text-sm leading-relaxed">
-        <FeedEventContent {event} {reactionOptions} {profileLabel} />
+        <FeedEventContent {event} {profiles} {reactionOptions} {profileLabel} />
       </div>
     </div>
   {/each}

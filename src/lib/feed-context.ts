@@ -47,6 +47,7 @@ export interface FeedContext {
 
   oldestTimestamp: number | null;
   pageCursorTimestamp: number | null;
+  engagementTargetIds: string[];
   engagementTargetsKey: string;
   seenEngagementIds: SeenEngagementIds;
 }
@@ -82,6 +83,7 @@ export function createFeedContext(notify: () => void): FeedContext {
     engagementSub: null,
     oldestTimestamp: null,
     pageCursorTimestamp: null,
+    engagementTargetIds: [],
     engagementTargetsKey: '',
     seenEngagementIds: {
       reactions: new Map<string, Set<string>>(),

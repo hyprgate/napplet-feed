@@ -111,6 +111,10 @@
     store.loadMore(intent);
   }
 
+  function setEngagementTargetIds(targetIds: string[]): void {
+    store.setEngagementTargetIds(targetIds);
+  }
+
   $effect(() => {
     if (!loading && canLoadMore && timeline.length === 0) {
       loadMore();
@@ -401,11 +405,11 @@
         no notes yet
       </div>
     {:else if viewMode === 'compact'}
-      <FeedList events={visibleTimeline} {profiles} {engagement} {reactionOptions} {loading} {canLoadMore} onLoadMore={loadMore} />
+      <FeedList events={visibleTimeline} {profiles} {engagement} {reactionOptions} {loading} {canLoadMore} onLoadMore={loadMore} onVisibleEventsChange={setEngagementTargetIds} />
     {:else if viewMode === 'cards'}
-      <FeedCards events={visibleTimeline} {profiles} {engagement} {reactionOptions} {loading} {canLoadMore} onLoadMore={loadMore} />
+      <FeedCards events={visibleTimeline} {profiles} {engagement} {reactionOptions} {loading} {canLoadMore} onLoadMore={loadMore} onVisibleEventsChange={setEngagementTargetIds} />
     {:else}
-      <FeedTerminal events={visibleTimeline} {profiles} {engagement} {loading} {canLoadMore} onLoadMore={loadMore} />
+      <FeedTerminal events={visibleTimeline} {profiles} {engagement} {loading} {canLoadMore} onLoadMore={loadMore} onVisibleEventsChange={setEngagementTargetIds} />
     {/if}
   </div>
 </div>

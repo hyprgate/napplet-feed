@@ -6,16 +6,11 @@
   import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle, resourceImage } from '@hyprgate/utils';
   import type { EngagementCounts } from '../lib/feed-store';
   import type { EmojiOption } from '../lib/emoji-sets';
+  import type { ProfileContent } from '../lib/profile-metadata';
   import { replyContextForEvent } from '../lib/note-presentation';
   import EngagementPills from './EngagementPills.svelte';
   import FeedEventContent from './FeedEventContent.svelte';
   import ReplyContextLink from './ReplyContextLink.svelte';
-
-  interface ProfileContent {
-    name?: string;
-    display_name?: string;
-    picture?: string;
-  }
 
   interface Props {
     event: NostrEvent;
@@ -121,7 +116,7 @@
 
     <!-- Note content -->
     <div class="text-text-primary text-sm leading-relaxed">
-      <FeedEventContent {event} {reactionOptions} {profileLabel} />
+      <FeedEventContent {event} {profiles} {reactionOptions} {profileLabel} />
     </div>
   </div>
 </div>

@@ -13,6 +13,7 @@ import type { NostrEvent } from '@hyprgate/types';
 import { KIND_ZAP_RECEIPT, KIND_ZAP_REQUEST } from '@hyprgate/utils';
 import { createFeedStore } from './feed-store';
 import { TIMELINE_CACHE_LIMIT } from './feed-engine';
+import { FEED_ENGAGEMENT_TARGET_LIMIT } from './feed-engagement';
 import { TIMELINE_PAGE_LIMIT_BY_INTENT } from './feed-load-strategy';
 
 // ─── Mock @napplet/sdk ────────────────────────────────────────────────────────
@@ -427,6 +428,47 @@ describe('createFeedStore', () => {
     expect((loadMoreCall![0] as Array<{ until?: number }>)[0]?.until).toBe(950);
   });
 
+  it('clips sparse page cursors before ancient relay outliers', async () => {
+    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEose: (() => void) | null = null;
+
+    mockSubscribe.mockImplementation(
+      (_filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+        if (!capturedTimelineOnEvent) {
+          capturedTimelineOnEvent = onEvent;
+          capturedTimelineOnEose = onEose;
+        }
+        return { close: mockCloseFn };
+      },
+    );
+
+    const store = createFeedStore();
+    store.switchSource('global');
+    await flush();
+
+    capturedTimelineOnEvent!(makeEvent('recent-0', 1_800_000_000));
+    capturedTimelineOnEvent!(makeEvent('recent-1', 1_799_999_900));
+    capturedTimelineOnEvent!(makeEvent('ancient-outlier', 1_650_000_000));
+    capturedTimelineOnEose!();
+
+    expect(store.state.timeline.map((event) => event.id)).toEqual([
+      'recent-0',
+      'recent-1',
+      'ancient-outlier',
+    ]);
+    expect(store.state.canLoadMore).toBe(true);
+
+    store.loadMore();
+    await flush();
+
+    const loadMoreCall = mockSubscribe.mock.calls.find((call) => {
+      const filters = call[0] as Array<{ until?: number }>;
+      return filters[0]?.until !== undefined;
+    });
+    expect(loadMoreCall).toBeDefined();
+    expect((loadMoreCall![0] as Array<{ until?: number }>)[0]?.until).toBe(1_799_999_899);
+  });
+
   it('advances the load-more cursor when the first page is filtered out', async () => {
     const timelineCallbacks: Array<{
       onEvent: (e: NostrEvent) => void;
@@ -754,7 +796,46 @@ describe('createFeedStore', () => {
     const calls = engagementSubscribeCalls();
     expect(calls).toHaveLength(1);
     const filters = calls[0]![0] as Array<{ '#e'?: string[] }>;
-    expect(filters[0]?.['#e']).toHaveLength(50);
+    expect(filters[0]?.['#e']).toEqual(
+      Array.from({ length: FEED_ENGAGEMENT_TARGET_LIMIT }, (_value, index) => `note-${index}`),
+    );
+  });
+
+  it('retargets engagement streams to visible timeline notes', async () => {
+    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEose: (() => void) | null = null;
+
+    mockSubscribe.mockImplementation(
+      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+        const filter = (filters as Array<{ kinds?: number[]; since?: number; '#e'?: string[] }>)[0];
+        if (
+          !capturedTimelineOnEvent
+          && filter?.since === undefined
+          && filter?.['#e'] === undefined
+          && filter?.kinds?.includes(1)
+        ) {
+          capturedTimelineOnEvent = onEvent;
+          capturedTimelineOnEose = onEose;
+        }
+        return { close: mockCloseFn };
+      },
+    );
+
+    const store = createFeedStore();
+    store.switchSource('global');
+    await flush();
+
+    for (let index = 0; index < 50; index++) {
+      capturedTimelineOnEvent!(makeEvent(`note-${index}`, 2000 - index));
+    }
+    capturedTimelineOnEose!();
+
+    store.setEngagementTargetIds(['note-20', 'note-21', 'missing-note', 'note-20']);
+
+    const calls = engagementSubscribeCalls();
+    expect(calls).toHaveLength(2);
+    const filters = calls[1]![0] as Array<{ '#e'?: string[] }>;
+    expect(filters[0]?.['#e']).toEqual(['note-20', 'note-21']);
   });
 
   it('subscribes to reply-capable timeline kinds while hiding replies by default', async () => {

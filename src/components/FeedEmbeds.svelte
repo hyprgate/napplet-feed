@@ -4,9 +4,11 @@
   import ProfileEmbed from './ProfileEmbed.svelte';
   import ResourceEmbed from './ResourceEmbed.svelte';
   import { MAX_INLINE_EVENT_DEPTH, isInlineDepthExhausted } from '../lib/rendering-fallbacks';
+  import type { ProfileContent } from '../lib/profile-metadata';
 
   interface Props {
     content: string;
+    profiles?: Map<string, ProfileContent>;
     profileLabel?: (pubkey: string) => string;
     depth?: number;
     maxDepth?: number;
@@ -14,6 +16,7 @@
 
   let {
     content,
+    profiles = new Map<string, ProfileContent>(),
     profileLabel = (pubkey: string) => `${pubkey.slice(0, 12)}...`,
     depth = 0,
     maxDepth = MAX_INLINE_EVENT_DEPTH,
@@ -26,10 +29,10 @@
   <div class="feed-embeds" aria-label="Resolved note references">
     {#each embeds as embed (`${embed.type}:${embed.value}`)}
       {#if embed.type === 'profile'}
-        <ProfileEmbed pubkey={embed.value} />
+        <ProfileEmbed pubkey={embed.value} profile={profiles.get(embed.value)} {profileLabel} />
       {:else if embed.type === 'event'}
         {#if canRenderNestedEvents}
-          <EventEmbed id={embed.value} {profileLabel} depth={depth + 1} {maxDepth} />
+          <EventEmbed id={embed.value} {profiles} {profileLabel} depth={depth + 1} {maxDepth} />
         {:else}
           <div class="depth-limit" data-feed-inline-depth-limit>Nested note limit reached.</div>
         {/if}
