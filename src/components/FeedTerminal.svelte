@@ -9,6 +9,7 @@
     type FeedLoadIntent,
   } from '../lib/feed-load-strategy';
   import { createEngagementVisibilityTracker } from '../lib/feed-visible-targets';
+  import { attachScrollKeyListener } from '../lib/keyboard-scroll';
   import type { ProfileContent } from '../lib/profile-metadata';
   import { previewContent, replyContextForEvent, shouldTruncateContent, terminalEngagementLabel } from '../lib/note-presentation';
   import { terminalEventContent } from '../lib/rendering-fallbacks';
@@ -76,6 +77,12 @@
     if (intent) maybeLoadMore(intent);
   }
 
+  // Issue #183: PageUp/PageDown/Home/End scroll the container explicitly, so they
+  // work even though the scroller isn't the document scrolling element and the
+  // iframe's activeElement is <body>. Listens at document level (keys bubble there)
+  // and bows out for text inputs so typing/caret nav is untouched.
+  $effect(() => attachScrollKeyListener(() => scroller));
+
   $effect(() => {
     if (!sentinel || !onLoadMore) return;
     const observers = FEED_LOAD_THRESHOLDS.map(({ intent, rootMargin }) => {
@@ -101,7 +108,14 @@
   });
 </script>
 
-<div bind:this={scroller} class="feed-terminal overflow-y-auto flex-1 bg-bg-base font-mono text-accent-green" onscroll={loadMoreForScrollPosition}>
+<div
+  bind:this={scroller}
+  class="feed-terminal overflow-y-auto flex-1 bg-bg-base font-mono text-accent-green focus:outline-none"
+  tabindex="-1"
+  role="group"
+  aria-label="Feed"
+  onscroll={loadMoreForScrollPosition}
+>
   {#each events as event (event.id)}
     {@const profile = profiles.get(event.pubkey)}
     {@const counts = engagement.get(event.id)}
