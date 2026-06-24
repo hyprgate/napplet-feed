@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { NostrEvent, NostrFilter } from '@hyprgate/types';
-  import { relay, type Subscription } from '@napplet/sdk';
+  import { relay, link, type Subscription } from '@napplet/sdk';
   import {
     KIND_APP_HANDLER,
     KIND_APP_HANDLER_RECOMMENDATION,
@@ -10,6 +10,7 @@
     nip89HandlerFromEvent,
     nip89HandlerSupportsKind,
     nip89RecommendationRefsForKind,
+    shouldInterceptLinkClick,
     type Nip89Handler,
   } from '@hyprgate/utils';
 
@@ -80,6 +81,17 @@
       subscriptions = [];
     };
   });
+
+  // NAP-LINK: open the NIP-89 handler URL via the shell-owned opener so the new
+  // browsing context does not inherit this napplet's origin.
+  async function openHandlerLink(event: MouseEvent, href: string): Promise<void> {
+    if (!shouldInterceptLinkClick(event)) return;
+    event.preventDefault();
+    const result = await link.open(href);
+    if (result.status !== 'opened') {
+      window.open(href, '_blank', 'noopener,noreferrer');
+    }
+  }
 </script>
 
 <div class="unsupported-event" data-feed-unsupported-kind={event.kind}>
@@ -87,7 +99,7 @@
   {#if actions.length > 0}
     <div class="handler-actions" aria-label="Application handlers">
       {#each actions as action (action.identity)}
-        <a class="handler-action" href={action.href} target="_blank" rel="noreferrer" data-feed-handler-action={action.identity}>
+        <a class="handler-action" href={action.href} target="_blank" rel="noreferrer" data-feed-handler-action={action.identity} onclick={(e) => void openHandlerLink(e, action.href)}>
           {action.label}
         </a>
       {/each}

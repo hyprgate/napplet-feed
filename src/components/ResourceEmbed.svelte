@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { requestRuntimePlayback, resourceImageBatch as resourceImage, resolveExternalVideoEmbed } from '@hyprgate/utils';
+  import { requestRuntimePlayback, resourceImageBatch as resourceImage, resolveExternalVideoEmbed, shouldInterceptLinkClick } from '@hyprgate/utils';
+  import { link } from '@napplet/sdk';
 
   interface Props {
     source: string;
@@ -10,6 +11,17 @@
   let pending = $state(false);
   let error = $state<string | null>(null);
   const externalVideo = $derived(mediaType === 'video' ? resolveExternalVideoEmbed(source) : null);
+
+  // NAP-LINK: open the external provider page via the shell-owned opener so the
+  // new browsing context does not inherit this napplet's origin.
+  async function openProviderLink(event: MouseEvent): Promise<void> {
+    if (!shouldInterceptLinkClick(event)) return;
+    event.preventDefault();
+    const result = await link.open(source);
+    if (result.status !== 'opened') {
+      window.open(source, '_blank', 'noopener,noreferrer');
+    }
+  }
 
   async function playVideo(): Promise<void> {
     if (pending) return;
@@ -36,7 +48,7 @@
   {#if mediaType === 'image'}
     <img use:resourceImage={source} alt="embedded resource" loading="lazy" />
   {:else if externalVideo}
-    <a class="provider-card" href={source} target="_blank" rel="noopener noreferrer">
+    <a class="provider-card" href={source} target="_blank" rel="noopener noreferrer" onclick={(e) => void openProviderLink(e)}>
       <span class="provider-art" class:empty={!externalVideo.thumbnailUrl}>
         {#if externalVideo.thumbnailUrl}
           <img use:resourceImage={externalVideo.thumbnailUrl} alt="" loading="lazy" />
