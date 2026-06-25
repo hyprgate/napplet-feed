@@ -1,23 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { inc as ipc } from '@napplet/sdk';
-  import { pubkeyColorStyle, resourceImage } from '@hyprgate/utils';
+  import { pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
   import { nip19 } from 'nostr-tools';
-  import { subscribeProfileMetadata } from '../lib/profile-metadata';
+  import { subscribeProfileMetadata, type ProfileContent } from '../lib/profile-metadata';
 
   interface Props {
     pubkey: string;
+    profile?: ProfileContent;
+    profileLabel?: (pubkey: string) => string;
   }
 
-  interface ProfileContent {
-    name?: string;
-    display_name?: string;
-    picture?: string;
-  }
-
-  let { pubkey }: Props = $props();
-  let profile = $state<ProfileContent | null>(null);
+  let { pubkey, profile: cachedProfile, profileLabel }: Props = $props();
+  let subscribedProfile = $state<ProfileContent | null>(null);
   let status = $state<'loading' | 'ready' | 'empty' | 'error'>('loading');
+  let resolvedProfile = $derived(cachedProfile ?? subscribedProfile);
 
   function openProfile(): void {
     ipc.emit('profile:open', [], JSON.stringify({ pubkey }));
@@ -31,16 +28,25 @@
     }
   }
 
-  let displayName = $derived(profile?.display_name ?? profile?.name ?? shortNpub());
-  let fallback = $derived((profile?.display_name ?? profile?.name ?? pubkey).slice(0, 2).toUpperCase());
+  let displayName = $derived(
+    resolvedProfile?.display_name
+      ?? resolvedProfile?.displayName
+      ?? resolvedProfile?.name
+      ?? resolvedProfile?.nip05
+      ?? profileLabel?.(pubkey)
+      ?? shortNpub(),
+  );
+  let fallback = $derived(displayName.slice(0, 2).toUpperCase());
+  let displayStatus = $derived(cachedProfile || subscribedProfile ? 'ready' : status);
 
   onMount(() => {
+    if (cachedProfile) return;
     let sawProfile = false;
     try {
       const subscription = subscribeProfileMetadata(
         [pubkey],
         (_profilePubkey, next) => {
-          profile = next;
+          subscribedProfile = next;
           sawProfile = true;
           status = 'ready';
         },
@@ -55,17 +61,24 @@
   });
 </script>
 
-<button type="button" class="profile-embed" onclick={openProfile}>
+<button
+  type="button"
+  class="profile-embed"
+  onclick={openProfile}
+  data-profile-embed
+  data-profile-embed-pubkey={pubkey}
+  data-profile-embed-label={displayName}
+>
   <span class="avatar">
-    {#if profile?.picture}
-      <img use:resourceImage={profile.picture} alt="" loading="lazy" />
+    {#if resolvedProfile?.picture}
+      <img use:resourceImage={resolvedProfile.picture} alt="" loading="lazy" />
     {:else}
       <span>{fallback}</span>
     {/if}
   </span>
   <span class="body">
     <span class="label">profile</span>
-    <span class="name" style={pubkeyColorStyle(pubkey)}>{status === 'loading' ? 'Loading profile...' : displayName}</span>
+    <span class="name" style={pubkeyColorStyle(pubkey)}>{displayStatus === 'loading' ? 'Loading profile...' : displayName}</span>
   </span>
 </button>
 

@@ -1,13 +1,14 @@
   <script lang="ts">
     import type { NostrEvent } from 'applesauce-core/helpers/event';
     import type { EngagementCounts } from '../lib/feed-store';
-    import {
-      FEED_LOAD_THRESHOLDS,
-      getProactiveLoadIntent,
-      type FeedLoadIntent,
-    } from '../lib/feed-load-strategy';
-    import type { EmojiOption } from '../lib/emoji-sets';
-    import NoteEntry from './NoteEntry.svelte';
+	    import {
+	      FEED_LOAD_THRESHOLDS,
+	      getProactiveLoadIntent,
+	      type FeedLoadIntent,
+	    } from '../lib/feed-load-strategy';
+	    import type { EmojiOption } from '../lib/emoji-sets';
+	    import { createEngagementVisibilityTracker } from '../lib/feed-visible-targets';
+	    import NoteEntry from './NoteEntry.svelte';
 
   interface ProfileContent {
     name?: string;
@@ -23,13 +24,27 @@
     loading: boolean;
     canLoadMore: boolean;
     onLoadMore?: (intent?: FeedLoadIntent) => void;
+    onVisibleEventsChange?: (ids: string[]) => void;
   }
 
-  let { events, profiles, engagement, reactionOptions, canLoadMore, onLoadMore }: Props = $props();
+  let {
+    events,
+    profiles,
+    engagement,
+    reactionOptions,
+    canLoadMore,
+    onLoadMore,
+    onVisibleEventsChange,
+  }: Props = $props();
 
   // Sentinel element for IntersectionObserver (load more trigger)
   let scroller: HTMLDivElement | undefined = $state(undefined);
   let sentinel: HTMLDivElement | undefined = $state(undefined);
+  const trackEngagementVisibility = createEngagementVisibilityTracker(
+    () => scroller,
+    () => events,
+    () => onVisibleEventsChange,
+  );
 
   function maybeLoadMore(intent: FeedLoadIntent = 'prefetch'): void {
     if (!canLoadMore) return;
@@ -72,7 +87,9 @@
 <div bind:this={scroller} class="feed-list overflow-y-auto flex-1" onscroll={loadMoreForScrollPosition}>
   <div class="divide-y divide-border-dim">
     {#each events as event (event.id)}
-      <NoteEntry {event} {profiles} profile={profiles.get(event.pubkey)} engagement={engagement.get(event.id)} {reactionOptions} />
+      <div use:trackEngagementVisibility={event.id}>
+        <NoteEntry {event} {profiles} profile={profiles.get(event.pubkey)} engagement={engagement.get(event.id)} {reactionOptions} />
+      </div>
     {/each}
   </div>
   <!-- Sentinel for infinite scroll -->

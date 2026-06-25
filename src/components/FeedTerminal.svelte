@@ -8,15 +8,11 @@
     getProactiveLoadIntent,
     type FeedLoadIntent,
   } from '../lib/feed-load-strategy';
+  import { createEngagementVisibilityTracker } from '../lib/feed-visible-targets';
+  import type { ProfileContent } from '../lib/profile-metadata';
   import { previewContent, replyContextForEvent, shouldTruncateContent, terminalEngagementLabel } from '../lib/note-presentation';
   import { terminalEventContent } from '../lib/rendering-fallbacks';
   import ReplyContextLink from './ReplyContextLink.svelte';
-
-  interface ProfileContent {
-    name?: string;
-    display_name?: string;
-    picture?: string;
-  }
 
   interface Props {
     events: NostrEvent[];
@@ -25,9 +21,10 @@
     loading: boolean;
     canLoadMore: boolean;
     onLoadMore?: (intent?: FeedLoadIntent) => void;
+    onVisibleEventsChange?: (ids: string[]) => void;
   }
 
-  let { events, profiles, engagement, canLoadMore, onLoadMore }: Props = $props();
+  let { events, profiles, engagement, canLoadMore, onLoadMore, onVisibleEventsChange }: Props = $props();
 
   function shortenPubkey(pubkey: string): string {
     try {
@@ -61,6 +58,11 @@
   // Sentinel element for IntersectionObserver
   let scroller: HTMLDivElement | undefined = $state(undefined);
   let sentinel: HTMLDivElement | undefined = $state(undefined);
+  const trackEngagementVisibility = createEngagementVisibilityTracker(
+    () => scroller,
+    () => events,
+    () => onVisibleEventsChange,
+  );
 
   function maybeLoadMore(intent: FeedLoadIntent = 'prefetch'): void {
     if (!canLoadMore) return;
@@ -108,6 +110,7 @@
     <div
       class="px-2 py-0.5 hover:bg-bg-surface leading-tight text-sm whitespace-pre-wrap break-words"
       style={pubkeyColorStyle(event.pubkey)}
+      use:trackEngagementVisibility={event.id}
       data-feed-author-pubkey={event.pubkey}
       data-feed-author-label={getAuthorName(event.pubkey, profile)}
     >

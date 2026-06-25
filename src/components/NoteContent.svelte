@@ -12,6 +12,7 @@
   }
 
   let { content, emojiTags = [], profileLabel }: Props = $props();
+  const FEED_RESOURCE_BATCH_SIZE = 10;
 
   function openProfile(pubkey: string): void {
     if (!isCanonicalHexPubkey(pubkey)) return;
@@ -19,4 +20,11 @@
   }
 </script>
 
-<NoteContent {content} {emojiTags} {profileLabel} onProfileClick={openProfile} videoTitle="Feed video" />
+<NoteContent
+  {content}
+  {emojiTags}
+  {profileLabel}
+  onProfileClick={openProfile}
+  resourceBatchSize={FEED_RESOURCE_BATCH_SIZE}
+  videoTitle="Feed video"
+/>

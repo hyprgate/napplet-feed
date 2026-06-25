@@ -17,6 +17,7 @@ import {
   init,
   loadMore,
   loadNewNotes,
+  setEngagementTargetIds,
   setShowReplies,
   switchSource,
   teardownSubscriptions,
@@ -56,6 +57,7 @@ export interface FeedStore {
   applyPayload(payload: FeedIntentPayload): void;
   /** The active payload driving the subscription, or null. */
   readonly currentPayload: FeedIntentPayload | null;
+  setEngagementTargetIds(targetIds: string[]): void;
   loadNewNotes(): void;
   loadMore(intent?: FeedLoadIntent): void;
   destroy(): void;
@@ -87,6 +89,7 @@ export function createFeedStore(onUpdate?: () => void): FeedStore {
     get currentPayload(): FeedIntentPayload | null {
       return ctx.currentPayload;
     },
+    setEngagementTargetIds: (targetIds) => setEngagementTargetIds(ctx, targetIds),
     loadNewNotes: () => loadNewNotes(ctx),
     loadMore: (intent) => loadMore(ctx, intent),
     destroy: () => teardownSubscriptions(ctx),

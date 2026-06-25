@@ -21,12 +21,37 @@ import {
 
 type EngagementCategory = keyof SeenEngagementIds;
 
+export const FEED_ENGAGEMENT_TARGET_LIMIT = 16;
+
 export function resetEngagement(ctx: FeedContext): void {
   ctx.state.engagement.clear();
   ctx.state.engagementVersion++;
   ctx.seenEngagementIds.reactions.clear();
   ctx.seenEngagementIds.comments.clear();
   ctx.seenEngagementIds.zaps.clear();
+}
+
+export function selectEngagementTargetIds(
+  timeline: NostrEvent[],
+  requestedTargetIds: string[],
+  limit = FEED_ENGAGEMENT_TARGET_LIMIT,
+): string[] {
+  if (limit <= 0) return [];
+  const loadedIds = new Set(timeline.map((event) => event.id));
+  const sourceIds = requestedTargetIds.length > 0
+    ? requestedTargetIds
+    : timeline.map((event) => event.id);
+  const selected: string[] = [];
+  const seen = new Set<string>();
+
+  for (const id of sourceIds) {
+    if (!loadedIds.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    selected.push(id);
+    if (selected.length >= limit) break;
+  }
+
+  return selected;
 }
 
 function getCounts(ctx: FeedContext, noteId: string): EngagementCounts {
@@ -116,7 +141,7 @@ function applyEngagementEvent(ctx: FeedContext, event: NostrEvent): void {
 }
 
 export function syncEngagementSubscription(ctx: FeedContext): void {
-  const targetIds = ctx.state.timeline.map((event) => event.id);
+  const targetIds = selectEngagementTargetIds(ctx.state.timeline, ctx.engagementTargetIds);
   const nextKey = targetIds.join(',');
   if (nextKey === ctx.engagementTargetsKey) return;
 

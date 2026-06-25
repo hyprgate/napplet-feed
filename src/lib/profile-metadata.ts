@@ -17,6 +17,8 @@ function getShell(): NappletShellHandle | null {
 export interface ProfileContent {
   name?: string;
   display_name?: string;
+  displayName?: string;
+  nip05?: string;
   picture?: string;
 }
 
@@ -36,6 +38,8 @@ function parseProfileEvent(event: NostrEvent): ProfileContent | null {
     return {
       name: optionalString(metadata.name),
       display_name: optionalString(metadata.display_name),
+      displayName: optionalString(metadata.displayName),
+      nip05: optionalString(metadata.nip05),
       picture: optionalString(metadata.picture),
     };
   } catch {

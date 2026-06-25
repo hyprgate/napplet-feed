@@ -31,6 +31,7 @@ export { normalizeReactionContent } from './feed-context.js';
 const EMPTY_FOLLOWING_AUTHOR = '0'.repeat(64);
 const TIMELINE_PAGE_EOSE_TIMEOUT_MS = 5000;
 const URGENT_TIMELINE_PAGE_TIMEOUT_MS = 2000;
+export const SPARSE_PAGE_CURSOR_GAP_SECONDS = 7 * 24 * 60 * 60;
 export const TIMELINE_CACHE_LIMIT = TIMELINE_PAGE_LIMIT * 20;
 type TimelinePageCompletion = 'eose' | 'timeout';
 
@@ -135,6 +136,23 @@ function selectTimelinePageEvents(pageCandidates: NostrEvent[], pageLimit: numbe
   return pageCandidates.slice(0, pageLimit);
 }
 
+export function selectPageCursorTimestamp(
+  selectedEvents: NostrEvent[],
+  maxSparseGapSeconds = SPARSE_PAGE_CURSOR_GAP_SECONDS,
+): number | null {
+  if (selectedEvents.length === 0) return null;
+  let cursor = selectedEvents[0]!.created_at;
+
+  for (let index = 1; index < selectedEvents.length; index++) {
+    const previous = selectedEvents[index - 1]!;
+    const current = selectedEvents[index]!;
+    if (previous.created_at - current.created_at > maxSparseGapSeconds) return previous.created_at;
+    cursor = current.created_at;
+  }
+
+  return cursor;
+}
+
 function applyTimelinePageSelection(
   ctx: FeedContext,
   pageCandidates: NostrEvent[],
@@ -169,9 +187,13 @@ function commitPageCursor(
   completion: TimelinePageCompletion,
 ): void {
   const selectedEvents = selectTimelinePageEvents(pageCandidates, pageLimit);
-  ctx.pageCursorTimestamp = oldestCreatedAt(selectedEvents);
+  const oldestSelectedTimestamp = oldestCreatedAt(selectedEvents);
+  ctx.pageCursorTimestamp = selectPageCursorTimestamp(selectedEvents);
+  const cursorClippedSparseGap = ctx.pageCursorTimestamp !== null
+    && oldestSelectedTimestamp !== null
+    && ctx.pageCursorTimestamp > oldestSelectedTimestamp;
   ctx.state.canLoadMore = ctx.pageCursorTimestamp !== null
-    && (selectedEvents.length === pageLimit || completion === 'timeout');
+    && (selectedEvents.length === pageLimit || completion === 'timeout' || cursorClippedSparseGap);
 }
 
 function clearTimelinePageTimeout(ctx: FeedContext): void {
@@ -210,6 +232,7 @@ export function teardownSubscriptions(ctx: FeedContext): void {
   ctx.timelinePageInFlight = false;
   ctx.pendingLoadMoreIntent = null;
   ctx.timelineRequestId++;
+  ctx.engagementTargetIds = [];
   ctx.engagementTargetsKey = '';
 }
 
@@ -316,6 +339,7 @@ export function applyPayload(ctx: FeedContext, payload: FeedIntentPayload): void
   resetEngagement(ctx);
   ctx.engagementSub?.close();
   ctx.engagementSub = null;
+  ctx.engagementTargetIds = [];
   ctx.engagementTargetsKey = '';
   ctx.oldestTimestamp = null;
   ctx.pageCursorTimestamp = null;
@@ -472,6 +496,7 @@ function resetAndRestartFeed(ctx: FeedContext): void {
   ctx.seenIds.clear();
   ctx.pendingIds.clear();
   resetEngagement(ctx);
+  ctx.engagementTargetIds = [];
   ctx.oldestTimestamp = null;
   ctx.pageCursorTimestamp = null;
   ctx.pendingLoadMoreIntent = null;
@@ -500,6 +525,14 @@ export function setShowReplies(ctx: FeedContext, showReplies: boolean): void {
   rebuildVisibleTimeline(ctx);
   recomputeOldestTimestamp(ctx);
   ctx.notify();
+  syncEngagementSubscription(ctx);
+}
+
+export function setEngagementTargetIds(ctx: FeedContext, targetIds: string[]): void {
+  const nextTargetIds = [...new Set(targetIds.filter((id) => id.length > 0))];
+  const nextKey = nextTargetIds.join(',');
+  if (nextKey === ctx.engagementTargetIds.join(',')) return;
+  ctx.engagementTargetIds = nextTargetIds;
   syncEngagementSubscription(ctx);
 }
 

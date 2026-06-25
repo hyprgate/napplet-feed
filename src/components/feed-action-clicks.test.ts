@@ -263,4 +263,60 @@ describe('feed action click wiring', () => {
       unmount(component);
     }
   });
+
+  it('renders npub and nprofile mention embeds from cached profile metadata', async () => {
+    const npubMentionPubkey = 'd'.repeat(64);
+    const nprofileMentionPubkey = 'f'.repeat(64);
+    const component = mount(FeedProfileHydrationHarness, {
+      target: document.body,
+    }) as {
+      setView(view: 'compact' | 'cards' | 'terminal'): void;
+      setEvents(events: NostrEvent[]): void;
+      hydratePubkey(pubkey: string, profile: {
+        name?: string;
+        display_name?: string;
+        displayName?: string;
+        nip05?: string;
+        picture?: string;
+      }): void;
+    };
+    component.hydratePubkey(npubMentionPubkey, {
+      display_name: 'Cached Npub',
+      picture: 'https://example.test/npub.png',
+    });
+    component.hydratePubkey(nprofileMentionPubkey, {
+      displayName: 'Cached Nprofile',
+      nip05: 'nprofile@example.test',
+    });
+    component.setEvents([{
+      ...EVENT,
+      content: [
+        `nostr:${nip19.npubEncode(npubMentionPubkey)}`,
+        `nostr:${nip19.nprofileEncode({ pubkey: nprofileMentionPubkey })}`,
+      ].join(' '),
+    }]);
+    vi.mocked(relay.subscribe).mockClear();
+
+    for (const view of ['compact', 'cards'] as const) {
+      component.setView(view);
+      await tick();
+
+      const labels = Array.from(document.querySelectorAll('[data-profile-embed-label]'))
+        .map((element) => element.getAttribute('data-profile-embed-label'));
+      expect(labels).toContain('Cached Npub');
+      expect(labels).toContain('Cached Nprofile');
+      expect(relay.subscribe).not.toHaveBeenCalled();
+    }
+
+    document
+      .querySelector<HTMLButtonElement>(`[data-profile-embed-pubkey="${npubMentionPubkey}"]`)
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(inc.emit).toHaveBeenCalledWith(
+      'profile:open',
+      [],
+      JSON.stringify({ pubkey: npubMentionPubkey }),
+    );
+
+    unmount(component);
+  });
 });
