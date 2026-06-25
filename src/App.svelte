@@ -22,6 +22,7 @@
   // following-default behavior (which needs a pubkey to resolve kind-3).
   let payload: FeedIntentPayload | null = $state(null);
   let hasPayload = $derived(payload != null);
+  let payloadStartupResolved = $state(false);
 
   /** The inc topic the feed emits once subscribed to feed:open (Pitfall 2). */
   const FEED_READY_TOPIC = 'feed:ready';
@@ -47,6 +48,7 @@
       const valid = validateFeedIntentPayload(raw);
       if (!valid) return;
       payload = valid;
+      payloadStartupResolved = true;
       void setInstancePayload(valid);
     };
     // inc.on('feed:open', …) — the canonical NAP-INTENT delivery seam (key_link).
@@ -59,6 +61,9 @@
     void getInstancePayload().then((restored) => {
       if (controller.signal.aborted) return;
       if (restored && payload == null) payload = restored;
+      payloadStartupResolved = true;
+    }).catch(() => {
+      if (!controller.signal.aborted) payloadStartupResolved = true;
     });
 
     // Emit feed:ready AFTER the feed:open subscription is registered so the
@@ -87,7 +92,7 @@
   data-feed-payload={payload ? JSON.stringify(payload) : ''}
   data-feed-has-payload={hasPayload}
 >
-  {#if hasPayload || pubkey != null}
+  {#if payloadStartupResolved && (hasPayload || pubkey != null)}
     <!-- Render the feed when a valid payload exists OR a user is logged in.
          The payload path (W-2) does NOT require a pubkey; FeedContainer guards
          every pubkey-derived behavior behind a null check. -->

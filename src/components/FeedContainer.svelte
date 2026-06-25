@@ -206,7 +206,7 @@
 
   // The payload that has already been applied to the store, so a re-delivered or
   // identical payload does not rebuild the subscription (idempotent apply).
-  let appliedPayload: FeedIntentPayload | null = null;
+  let appliedPayloadKey: string | null = null;
   // Gate so the post-mount payload effect does not fire until the initial
   // restore (shared prefs + first source) has completed — otherwise it could
   // race the onMount sequence and double-open / clobber the subscription.
@@ -218,7 +218,7 @@
    */
   function applyActiveSource(): void {
     if (payload != null) {
-      appliedPayload = payload;
+      appliedPayloadKey = JSON.stringify(payload);
       store.applyPayload(payload);
       return;
     }
@@ -231,13 +231,15 @@
 
   // React to a payload that arrives AFTER the initial restore (the Plan 01
   // controller flushes feed:open once this window signals feed:ready —
-  // Pitfall 2). Guarded by `initialized` + an applied-payload reference check so
+  // Pitfall 2). Guarded by `initialized` + an applied-payload content check so
   // streamed store updates and the initial mount do not re-trigger an apply.
   $effect(() => {
     const next = payload;
     if (!initialized) return;
-    if (next != null && next !== appliedPayload) {
-      appliedPayload = next;
+    if (next != null) {
+      const nextKey = JSON.stringify(next);
+      if (nextKey === appliedPayloadKey) return;
+      appliedPayloadKey = nextKey;
       store.applyPayload(next);
     }
   });
