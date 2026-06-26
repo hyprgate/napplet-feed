@@ -5,6 +5,7 @@ import {
   type NoteViewerOpenPayload,
 } from '@hyprgate/utils';
 import { relay } from '@napplet/sdk';
+import { nip19 } from 'nostr-tools';
 
 export const POSITIVE_REACTION = '+' as const;
 export const FEED_REACTION_CLIENT_TAG = ['client', '@hyprgate/feed/reaction'] as const;
@@ -40,6 +41,56 @@ export function createFeedNoteOpenPayload(event: Pick<NostrEvent, 'id' | 'kind' 
     behavior: { focus: true },
     source: { napplet: 'feed' },
   });
+}
+
+export function createFeedReferenceOpenPayload(source: string): NoteViewerOpenPayload | null {
+  const encoded = source.trim().replace(/^nostr:/i, '');
+  if (!encoded) return null;
+
+  try {
+    const decoded = nip19.decode(encoded);
+    if (decoded.type === 'note') {
+      return createNoteViewerOpenPayload({
+        target: { type: 'event', id: decoded.data, nip19: encoded },
+        behavior: { focus: true },
+        source: { napplet: 'feed' },
+      });
+    }
+    if (decoded.type === 'nevent') {
+      const data = decoded.data;
+      return createNoteViewerOpenPayload({
+        target: {
+          type: 'event',
+          id: data.id,
+          ...(typeof data.kind === 'number' ? { kind: data.kind } : {}),
+          ...(typeof data.author === 'string' ? { pubkey: data.author } : {}),
+          nip19: encoded,
+        },
+        ...(Array.isArray(data.relays) ? { relays: data.relays } : {}),
+        behavior: { focus: true },
+        source: { napplet: 'feed' },
+      });
+    }
+    if (decoded.type === 'naddr') {
+      const data = decoded.data;
+      return createNoteViewerOpenPayload({
+        target: {
+          type: 'address',
+          kind: data.kind,
+          pubkey: data.pubkey,
+          identifier: data.identifier,
+          nip19: encoded,
+        },
+        ...(Array.isArray(data.relays) ? { relays: data.relays } : {}),
+        behavior: { focus: true },
+        source: { napplet: 'feed' },
+      });
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 export function createPositiveReactionTemplate(event: Pick<NostrEvent, 'id' | 'kind' | 'pubkey'>): {

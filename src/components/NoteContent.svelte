@@ -4,6 +4,7 @@
   import { inc as ipc, link } from '@napplet/sdk';
   import { isCanonicalHexPubkey } from '@hyprgate/utils';
   import NoteContent from '@hyprgate/napplet-ui/NoteContent.svelte';
+  import { createFeedReferenceOpenPayload, NOTE_VIEWER_OPEN_TOPIC } from '../lib/feed-actions';
 
   interface Props {
     content: string;
@@ -25,6 +26,12 @@
     const result = await link.open(url);
     return result.status === 'opened';
   }
+
+  function openReference(source: string): void {
+    const payload = createFeedReferenceOpenPayload(source);
+    if (!payload) return;
+    ipc.emit(NOTE_VIEWER_OPEN_TOPIC, [], JSON.stringify(payload));
+  }
 </script>
 
 <NoteContent
@@ -32,6 +39,7 @@
   {emojiTags}
   {profileLabel}
   onProfileClick={openProfile}
+  onReferenceClick={openReference}
   onOpenLink={openLink}
   resourceBatchSize={FEED_RESOURCE_BATCH_SIZE}
   videoTitle="Feed video"

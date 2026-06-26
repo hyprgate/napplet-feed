@@ -5,6 +5,7 @@ import { inc, relay } from '@napplet/sdk';
 import { nip19 } from 'nostr-tools';
 import FeedProfileHydrationHarness from './__fixtures__/FeedProfileHydrationHarness.svelte';
 import EventEmbed from './EventEmbed.svelte';
+import FeedNoteContent from './NoteContent.svelte';
 import NoteActions from './NoteActions.svelte';
 import NoteEntry from './NoteEntry.svelte';
 import { NOTE_VIEWER_OPEN_TOPIC } from '../lib/feed-actions';
@@ -235,6 +236,60 @@ describe('feed action click wiring', () => {
       [],
       JSON.stringify({ pubkey: EVENT.pubkey }),
     );
+  });
+
+  it('clicking an inline note reference emits a note-viewer event target', async () => {
+    const targetId = 'd'.repeat(64);
+    const note = nip19.noteEncode(targetId);
+    mount(FeedNoteContent, {
+      target: document.body,
+      props: { content: `inline nostr:${note}` },
+    });
+    await tick();
+
+    document.querySelector<HTMLButtonElement>('.note-content .ref')?.click();
+
+    expect(inc.emit).toHaveBeenCalledWith(NOTE_VIEWER_OPEN_TOPIC, [], expect.any(String));
+    expect(parseEmitPayload(0)).toEqual({
+      target: {
+        type: 'event',
+        id: targetId,
+        nip19: note,
+      },
+      behavior: { focus: true },
+      source: { napplet: 'feed' },
+    });
+  });
+
+  it('clicking an inline address reference emits a note-viewer address target', async () => {
+    const pubkey = 'c'.repeat(64);
+    const naddr = nip19.naddrEncode({
+      kind: 30023,
+      pubkey,
+      identifier: 'article',
+      relays: ['wss://relay.example'],
+    });
+    mount(FeedNoteContent, {
+      target: document.body,
+      props: { content: `inline nostr:${naddr}` },
+    });
+    await tick();
+
+    document.querySelector<HTMLButtonElement>('.note-content .ref')?.click();
+
+    expect(inc.emit).toHaveBeenCalledWith(NOTE_VIEWER_OPEN_TOPIC, [], expect.any(String));
+    expect(parseEmitPayload(0)).toEqual({
+      target: {
+        type: 'address',
+        kind: 30023,
+        pubkey,
+        identifier: 'article',
+        nip19: naddr,
+      },
+      relays: ['wss://relay.example'],
+      behavior: { focus: true },
+      source: { napplet: 'feed' },
+    });
   });
 
   it('updates visible feed author labels when profile metadata hydrates after render', async () => {
