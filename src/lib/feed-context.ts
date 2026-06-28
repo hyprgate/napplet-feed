@@ -36,9 +36,10 @@ export interface FeedContext {
    */
   currentPayload: FeedIntentPayload | null;
   timelinePageInFlight: boolean;
-  pendingLoadMoreIntent: FeedLoadIntent | null;
-  timelineRequestId: number;
-  timelinePageTimeout: ReturnType<typeof setTimeout> | null;
+	  pendingLoadMoreIntent: FeedLoadIntent | null;
+	  timelineRequestId: number;
+	  contactsRequestId: number;
+	  timelinePageTimeout: ReturnType<typeof setTimeout> | null;
 
   contactsSub: Subscription | null;
   timelineSub: Subscription | null;
@@ -74,9 +75,10 @@ export function createFeedContext(notify: () => void): FeedContext {
     contactPubkeys: [],
     currentPayload: null,
     timelinePageInFlight: false,
-    pendingLoadMoreIntent: null,
-    timelineRequestId: 0,
-    timelinePageTimeout: null,
+	    pendingLoadMoreIntent: null,
+	    timelineRequestId: 0,
+	    contactsRequestId: 0,
+	    timelinePageTimeout: null,
     contactsSub: null,
     timelineSub: null,
     liveSub: null,

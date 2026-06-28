@@ -31,9 +31,10 @@ export { normalizeReactionContent } from './feed-context.js';
 const EMPTY_FOLLOWING_AUTHOR = '0'.repeat(64);
 const TIMELINE_PAGE_EOSE_TIMEOUT_MS = 5000;
 const URGENT_TIMELINE_PAGE_TIMEOUT_MS = 2000;
+const EMPTY_AUTHOR_PAGE_GRACE_CLOSE_MS = 25_000;
 export const SPARSE_PAGE_CURSOR_GAP_SECONDS = 7 * 24 * 60 * 60;
 export const TIMELINE_CACHE_LIMIT = TIMELINE_PAGE_LIMIT * 20;
-type TimelinePageCompletion = 'eose' | 'timeout';
+type TimelinePageCompletion = 'eose' | 'timeout' | 'hard-timeout';
 
 // ── Timeline helpers ──────────────────────────────────────────────────────
 
@@ -193,13 +194,28 @@ function commitPageCursor(
     && oldestSelectedTimestamp !== null
     && ctx.pageCursorTimestamp > oldestSelectedTimestamp;
   ctx.state.canLoadMore = ctx.pageCursorTimestamp !== null
-    && (selectedEvents.length === pageLimit || completion === 'timeout' || cursorClippedSparseGap);
+    && (selectedEvents.length === pageLimit || completion !== 'eose' || cursorClippedSparseGap);
 }
 
 function clearTimelinePageTimeout(ctx: FeedContext): void {
   if (ctx.timelinePageTimeout === null) return;
   clearTimeout(ctx.timelinePageTimeout);
   ctx.timelinePageTimeout = null;
+}
+
+function isOutboxAuthorPayload(payload: FeedIntentPayload | null): boolean {
+  return payload?.origin === 'outbox'
+    && payload.filters.some((filter) => Array.isArray(filter.authors) && filter.authors.length > 0);
+}
+
+function shouldKeepEmptyTimedOutPageOpen(
+  ctx: FeedContext,
+  pageCandidates: NostrEvent[],
+  completion: TimelinePageCompletion,
+): boolean {
+  return completion === 'timeout'
+    && pageCandidates.length === 0
+    && isOutboxAuthorPayload(ctx.currentPayload);
 }
 
 function finalizeTimelinePage(
@@ -211,8 +227,16 @@ function finalizeTimelinePage(
 ): void {
   if (requestId !== ctx.timelineRequestId) return;
   clearTimelinePageTimeout(ctx);
-  ctx.timelineSub?.close();
-  ctx.timelineSub = null;
+  if (shouldKeepEmptyTimedOutPageOpen(ctx, pageCandidates, completion)) {
+    // Author outbox discovery can attach the useful relay after the UI timeout.
+    // Keep the historical leg alive briefly so late old notes can still render.
+    ctx.timelinePageTimeout = setTimeout(() => {
+      finalizeTimelinePage(ctx, requestId, pageCandidates, pageLimit, 'hard-timeout');
+    }, EMPTY_AUTHOR_PAGE_GRACE_CLOSE_MS);
+  } else {
+    ctx.timelineSub?.close();
+    ctx.timelineSub = null;
+  }
   commitPageCursor(ctx, pageCandidates, pageLimit, completion);
   ctx.timelinePageInFlight = false;
   ctx.state.loading = false;
@@ -232,6 +256,7 @@ export function teardownSubscriptions(ctx: FeedContext): void {
   ctx.timelinePageInFlight = false;
   ctx.pendingLoadMoreIntent = null;
   ctx.timelineRequestId++;
+  ctx.contactsRequestId++;
   ctx.engagementTargetIds = [];
   ctx.engagementTargetsKey = '';
 }
@@ -439,8 +464,13 @@ function initFollowingFeed(ctx: FeedContext, pubkey: string): void {
   // is delivered first, so this is both instant and correct.
   let bestCreatedAt = 0;
   let startedKey: string | null = null;
+  const contactsRequestId = ++ctx.contactsRequestId;
+
+  const isCurrentContactsRequest = (): boolean =>
+    ctx.contactsRequestId === contactsRequestId && ctx.contactsSub !== null;
 
   const startOrRestart = (): void => {
+    if (!isCurrentContactsRequest()) return;
     const key = ctx.contactPubkeys.join(',');
     if (key === startedKey) return; // contact set unchanged → nothing to do
     startedKey = key;
@@ -451,6 +481,7 @@ function initFollowingFeed(ctx: FeedContext, pubkey: string): void {
   };
 
   const startKnownContacts = (): void => {
+    if (!isCurrentContactsRequest()) return;
     if (startedKey !== null) return;
     startedKey = ctx.contactPubkeys.join(',');
     startFollowingFeed(ctx, ctx.contactPubkeys);
@@ -462,12 +493,14 @@ function initFollowingFeed(ctx: FeedContext, pubkey: string): void {
     { filters: [{ kinds: [3], authors: [pubkey], limit: 5 }], origin: 'outbox' },
     {
       onEvent: (event) => {
+        if (!isCurrentContactsRequest()) return;
         if (event.kind !== 3 || event.created_at <= bestCreatedAt) return;
         bestCreatedAt = event.created_at;
         ctx.contactPubkeys = contactsFromKind3(event);
         startOrRestart();
       },
       onEose: () => {
+        if (!isCurrentContactsRequest()) return;
         // EOSE before any kind-3 → user follows no one yet; render empty state.
         startKnownContacts();
       },
@@ -573,5 +606,8 @@ export function loadMore(ctx: FeedContext, intent: FeedLoadIntent = 'prefetch'):
  */
 export function applyExternalPayload(ctx: FeedContext, payload: FeedIntentPayload): void {
   ctx.state.error = null;
+  ctx.contactsSub?.close();
+  ctx.contactsSub = null;
+  ctx.contactsRequestId++;
   applyPayload(ctx, payload);
 }

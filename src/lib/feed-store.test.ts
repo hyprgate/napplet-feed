@@ -30,9 +30,10 @@ vi.mock('@napplet/sdk', () => ({
   },
 }));
 
-import { relay } from '@napplet/sdk';
+import { outbox, relay } from '@napplet/sdk';
 const _subscribe = relay.subscribe;
 const mockSubscribe = vi.mocked(_subscribe);
+const mockOutboxSubscribe = vi.mocked(outbox.subscribe);
 const mockCloseFn = vi.fn();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -67,6 +68,32 @@ function makeKind3Event(authorPubkey: string, followPubkeys: string[]): NostrEve
   };
 }
 
+interface FakeOutboxSub {
+  close: ReturnType<typeof vi.fn>;
+  handlers: Record<string, ((...args: unknown[]) => void) | undefined>;
+  on: (event: string, cb: (...args: unknown[]) => void) => void;
+  emit: (event: string, ...args: unknown[]) => void;
+}
+
+function makeOutboxSub(): FakeOutboxSub {
+  const sub: FakeOutboxSub = {
+    close: vi.fn(),
+    handlers: {},
+    on(event, cb) {
+      this.handlers[event] = cb;
+    },
+    emit(event, ...args) {
+      this.handlers[event]?.(...args);
+    },
+  };
+  return sub;
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function makeZapReceipt(id: string, targetId: string, amountMillisats: number, tagReceiptTarget = true): NostrEvent {
   const request = makeEvent(`${id}-request`, 1000, 'zapper', KIND_ZAP_REQUEST, [
     ['amount', String(amountMillisats)],
@@ -95,6 +122,7 @@ describe('createFeedStore', () => {
     vi.clearAllMocks();
     mockCloseFn.mockReset();
     mockSubscribe.mockReturnValue({ close: mockCloseFn });
+    mockOutboxSubscribe.mockReturnValue(makeOutboxSub() as unknown as ReturnType<typeof outbox.subscribe>);
     installShell(false);
   });
 
@@ -1220,6 +1248,101 @@ describe('createFeedStore', () => {
 
       expect(store.state.loading).toBe(false);
       expect(store.state.canLoadMore).toBe(false);
+      store.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps an empty timed-out outbox author page open so late historical events can populate before refresh', async () => {
+    vi.useFakeTimers();
+    try {
+      installShell(true);
+      const timelineSub = makeOutboxSub();
+      const liveSub = makeOutboxSub();
+      mockOutboxSubscribe
+        .mockReturnValueOnce(timelineSub as unknown as ReturnType<typeof outbox.subscribe>)
+        .mockReturnValueOnce(liveSub as unknown as ReturnType<typeof outbox.subscribe>);
+
+      const store = createFeedStore();
+      store.applyPayload({
+        filters: [{ kinds: [1], authors: ['a'.repeat(64)] }],
+        origin: 'outbox',
+        title: 'hzrd149',
+      });
+      await flushMicrotasks();
+
+      expect(store.state.loading).toBe(true);
+      vi.advanceTimersByTime(5000);
+
+      expect(store.state.loading).toBe(false);
+      expect(store.state.timeline).toEqual([]);
+      expect(timelineSub.close).not.toHaveBeenCalled();
+
+      timelineSub.emit('event', makeEvent('late-historical-author-note', 1000, 'a'.repeat(64)));
+
+      expect(store.state.timeline.map((event) => event.id)).toEqual(['late-historical-author-note']);
+
+      timelineSub.emit('eose');
+      expect(timelineSub.close).toHaveBeenCalledOnce();
+      store.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels stale following contact-list callbacks when an external payload arrives during startup', async () => {
+    installShell(true);
+    const contactsSub = makeOutboxSub();
+    const externalTimelineSub = makeOutboxSub();
+    mockOutboxSubscribe
+      .mockReturnValueOnce(contactsSub as unknown as ReturnType<typeof outbox.subscribe>)
+      .mockReturnValueOnce(externalTimelineSub as unknown as ReturnType<typeof outbox.subscribe>);
+
+    const store = createFeedStore();
+    store.init('f'.repeat(64));
+    store.applyPayload({
+      filters: [{ kinds: [1], authors: ['a'.repeat(64)] }],
+      origin: 'outbox',
+      title: 'hzrd149',
+    });
+    await flushMicrotasks();
+
+    contactsSub.emit('event', makeKind3Event('f'.repeat(64), ['b'.repeat(64)]));
+    contactsSub.emit('eose');
+
+    expect(contactsSub.close).toHaveBeenCalledOnce();
+    expect(store.currentPayload).toEqual({
+      filters: [{ kinds: [1], authors: ['a'.repeat(64)] }],
+      origin: 'outbox',
+      title: 'hzrd149',
+    });
+    expect(mockOutboxSubscribe).toHaveBeenCalledTimes(2);
+  });
+
+  it('hard-closes an empty timed-out outbox author page if no relay ever responds', async () => {
+    vi.useFakeTimers();
+    try {
+      installShell(true);
+      const timelineSub = makeOutboxSub();
+      const liveSub = makeOutboxSub();
+      mockOutboxSubscribe
+        .mockReturnValueOnce(timelineSub as unknown as ReturnType<typeof outbox.subscribe>)
+        .mockReturnValueOnce(liveSub as unknown as ReturnType<typeof outbox.subscribe>);
+
+      const store = createFeedStore();
+      store.applyPayload({
+        filters: [{ kinds: [1], authors: ['a'.repeat(64)] }],
+        origin: 'outbox',
+        title: 'hzrd149',
+      });
+      await flushMicrotasks();
+
+      vi.advanceTimersByTime(5000);
+      expect(timelineSub.close).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(25_001);
+      expect(timelineSub.close).toHaveBeenCalledOnce();
       store.destroy();
     } finally {
       vi.useRealTimers();
