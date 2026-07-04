@@ -11,7 +11,7 @@ import {
   parseZapReceipt,
 } from '@hyprgate/utils';
 import type { EngagementCounts } from '@hyprgate/utils';
-import { relay } from '@napplet/sdk';
+import { count, relay } from '@napplet/sdk';
 import {
   getCustomEmoji,
   normalizeReactionContent,
@@ -24,6 +24,8 @@ type EngagementCategory = keyof SeenEngagementIds;
 export const FEED_ENGAGEMENT_TARGET_LIMIT = 16;
 
 export function resetEngagement(ctx: FeedContext): void {
+  ctx.reactionCountRequestId++;
+  ctx.reactionCountTargetIds.clear();
   ctx.state.engagement.clear();
   ctx.state.engagementVersion++;
   ctx.seenEngagementIds.reactions.clear();
@@ -80,6 +82,29 @@ function getSeenSet(ctx: FeedContext, category: EngagementCategory, noteId: stri
     ctx.seenEngagementIds[category].set(noteId, seen);
   }
   return seen;
+}
+
+function reactionGroupTotal(counts: EngagementCounts): number {
+  return counts.reactionGroups.reduce((total, group) => total + group.count, 0);
+}
+
+function clearReactionEngagement(ctx: FeedContext, preserveDetailedTotals = false): boolean {
+  ctx.seenEngagementIds.reactions.clear();
+  let changed = false;
+  for (const [noteId, counts] of ctx.state.engagement) {
+    if (counts.reactions === 0 && counts.reactionGroups.length === 0) continue;
+    const reactions = preserveDetailedTotals && counts.reactionGroups.length > 0
+      ? Math.max(counts.reactions, reactionGroupTotal(counts))
+      : 0;
+    ctx.state.engagement.set(noteId, {
+      ...counts,
+      reactions,
+      reactionGroups: [],
+    });
+    changed = true;
+  }
+  if (changed) ctx.state.engagementVersion++;
+  return changed;
 }
 
 function matchingTargetIds(ctx: FeedContext, event: NostrEvent): string[] {
@@ -140,9 +165,48 @@ function applyEngagementEvent(ctx: FeedContext, event: NostrEvent): void {
   }
 }
 
+function applyReactionCount(ctx: FeedContext, noteId: string, reactionCount: number): boolean {
+  const counts = getCounts(ctx, noteId);
+  const count = Math.max(0, Math.floor(reactionCount));
+  if (counts.reactions === count && counts.reactionGroups.length === 0) return false;
+  ctx.state.engagement.set(noteId, {
+    ...counts,
+    reactions: count,
+    reactionGroups: [],
+  });
+  return true;
+}
+
+function syncReactionCounts(ctx: FeedContext, targetIds: string[], requestId: number): void {
+  for (const targetId of targetIds) {
+    if (ctx.reactionCountTargetIds.has(targetId)) continue;
+    ctx.reactionCountTargetIds.add(targetId);
+    void count.query({ kinds: [KIND_REACTION], '#e': [targetId] })
+      .then((result) => {
+        if (requestId !== ctx.reactionCountRequestId || ctx.state.detailedReactions) {
+          ctx.reactionCountTargetIds.delete(targetId);
+          return;
+        }
+        if (!result.ok || typeof result.count !== 'number') {
+          ctx.reactionCountTargetIds.delete(targetId);
+          return;
+        }
+        if (!applyReactionCount(ctx, targetId, result.count)) return;
+        ctx.state.engagementVersion++;
+        ctx.notify();
+      })
+      .catch(() => {
+        ctx.reactionCountTargetIds.delete(targetId);
+        // Missing count results are isolated to that target; other counts can render.
+      });
+  }
+}
+
 export function syncEngagementSubscription(ctx: FeedContext): void {
   const targetIds = selectEngagementTargetIds(ctx.state.timeline, ctx.engagementTargetIds);
-  const nextKey = targetIds.join(',');
+  const detailMode = ctx.state.detailedReactions;
+  const previousKey = ctx.engagementTargetsKey;
+  const nextKey = `${detailMode ? 'detail' : 'count'}:${targetIds.join(',')}`;
   if (nextKey === ctx.engagementTargetsKey) return;
 
   ctx.engagementSub?.close();
@@ -151,15 +215,29 @@ export function syncEngagementSubscription(ctx: FeedContext): void {
   ctx.engagementTargetsKey = nextKey;
   if (targetIds.length === 0) return;
 
+  const previousMode = previousKey.startsWith('detail:')
+    ? 'detail'
+    : previousKey.startsWith('count:') ? 'count' : null;
+  const nextMode = detailMode ? 'detail' : 'count';
+  const modeChanged = previousMode !== null && previousMode !== nextMode;
+  const reactionCountRequestId = ctx.reactionCountRequestId;
+  if (modeChanged) {
+    const clearedReactions = clearReactionEngagement(ctx, !detailMode);
+    if (clearedReactions) ctx.notify();
+  }
+  if (!detailMode) {
+    void syncReactionCounts(ctx, targetIds, reactionCountRequestId);
+  }
+
   ctx.engagementSub = relay.subscribe(
     [
-      { kinds: [KIND_REACTION], '#e': targetIds },
+      ...(detailMode ? [{ kinds: [KIND_REACTION], '#e': targetIds }] : []),
       { kinds: [KIND_TEXT_NOTE], '#e': targetIds },
       { kinds: [KIND_NIP22_COMMENT], '#e': targetIds },
       { kinds: [KIND_NIP22_COMMENT], '#E': targetIds },
       { kinds: [KIND_ZAP_RECEIPT], '#e': targetIds },
     ],
-    (event: NostrEvent) => applyEngagementEvent(ctx, event),
+    (result) => applyEngagementEvent(ctx, result.event as NostrEvent),
     () => {
       // Stored engagement events exhausted; keep listening for live updates.
     },

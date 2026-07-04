@@ -24,6 +24,7 @@ import {
 } from './feed-load-strategy.js';
 import { subscribeForPayload } from './feed-origin.js';
 import { resetEngagement, syncEngagementSubscription } from './feed-engagement.js';
+import { rememberEventRelayHints } from './event-relay-hints.js';
 
 export { TIMELINE_PAGE_LIMIT, createFeedContext, type FeedContext } from './feed-context.js';
 export { normalizeReactionContent } from './feed-context.js';
@@ -290,8 +291,9 @@ function startTimelineSubscription(
   ctx.timelineSub = subscribeForPayload(
     payload,
     {
-      onEvent: (event: NostrEvent) => {
+      onEvent: (event: NostrEvent, relayHints?: string[]) => {
         if (requestId !== ctx.timelineRequestId) return;
+        rememberEventRelayHints(event, relayHints);
         if (pageCandidateIds.has(event.id) || ctx.seenIds.has(event.id) || ctx.pendingIds.has(event.id)) return;
         pageCandidateIds.add(event.id);
         insertPageCandidate(pageCandidates, event);
@@ -318,7 +320,8 @@ function startLiveSubscription(ctx: FeedContext): void {
   ctx.liveSub = subscribeForPayload(
     payload,
     {
-      onEvent: (event: NostrEvent) => {
+      onEvent: (event: NostrEvent, relayHints?: string[]) => {
+        rememberEventRelayHints(event, relayHints);
         if (!ctx.seenIds.has(event.id) && !ctx.pendingIds.has(event.id)) {
           if (!isTimelineEventVisible(ctx, event)) {
             addToTimeline(ctx, event);
@@ -492,8 +495,9 @@ function initFollowingFeed(ctx: FeedContext, pubkey: string): void {
   ctx.contactsSub = subscribeForPayload(
     { filters: [{ kinds: [3], authors: [pubkey], limit: 5 }], origin: 'outbox' },
     {
-      onEvent: (event) => {
+      onEvent: (event, relayHints) => {
         if (!isCurrentContactsRequest()) return;
+        rememberEventRelayHints(event, relayHints);
         if (event.kind !== 3 || event.created_at <= bestCreatedAt) return;
         bestCreatedAt = event.created_at;
         ctx.contactPubkeys = contactsFromKind3(event);
@@ -559,6 +563,15 @@ export function setShowReplies(ctx: FeedContext, showReplies: boolean): void {
   recomputeOldestTimestamp(ctx);
   ctx.notify();
   syncEngagementSubscription(ctx);
+}
+
+export function setDetailedReactions(ctx: FeedContext, detailedReactions: boolean): void {
+  if (ctx.state.detailedReactions === detailedReactions) return;
+  ctx.reactionCountRequestId++;
+  ctx.reactionCountTargetIds.clear();
+  ctx.state.detailedReactions = detailedReactions;
+  syncEngagementSubscription(ctx);
+  ctx.notify();
 }
 
 export function setEngagementTargetIds(ctx: FeedContext, targetIds: string[]): void {

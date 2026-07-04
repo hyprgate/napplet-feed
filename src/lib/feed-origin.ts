@@ -6,7 +6,7 @@
 // relay.subscribe / profile-metadata's adapter):
 //
 //   origin:'outbox'  → NAP-OUTBOX discovery: outbox.subscribe(filters,
-//                      { strategy:'outbox', live:true }) when supports('outbox'),
+//                      { strategy:'outbox', live:<leg> }) when supports('outbox'),
 //                      else NAP-RELAYS fallback via relay.subscribe.
 //
 //   origin:'relay'   → NAP-RELAYS exact relay fan-out: one relay.subscribe call
@@ -17,7 +17,7 @@
 // The supports('outbox') gate MUST be read AFTER await shell.ready() — it is
 // false until shell.init lands (Phase 87 canonical pattern, profile-metadata.ts).
 
-import { outbox, relay, type Subscription } from '@napplet/sdk';
+import { outbox, relay, type Subscription, type RelayEventResult } from '@napplet/sdk';
 import type { FeedIntentPayload, NostrEvent, NostrFilter } from '@hyprgate/types';
 
 /** Minimal shape of the shim-installed shell handshake we depend on. */
@@ -32,7 +32,7 @@ function getShell(): NappletShellHandle | null {
 
 /** Callbacks for a payload subscription. */
 export interface PayloadSubscriptionCallbacks {
-  onEvent(event: NostrEvent): void;
+  onEvent(event: NostrEvent, relayHints?: string[]): void;
   onEose(): void;
 }
 
@@ -105,15 +105,23 @@ export function subscribeForPayload(
 
   function openOutbox(options: FeedOutboxSubscribeOptions): Subscription {
     const sub = outbox.subscribe(filters, options as unknown as Parameters<typeof outbox.subscribe>[1]);
-    sub.on('event', (event) => callbacks.onEvent(event as NostrEvent));
-    sub.on('eose', () => callbacks.onEose());
+    sub.on('event', (result: RelayEventResult) => callbacks.onEvent(
+      result.event as NostrEvent,
+      result.sidecar?.relayHints,
+    ));
+    sub.on('closed', () => {
+      if (!options.live) callbacks.onEose();
+    });
     return { close: () => sub.close() };
   }
 
   function openRelayFallback(relayUrl?: string): Subscription {
     return relay.subscribe(
       filters,
-      (event) => callbacks.onEvent(event as NostrEvent),
+      (result) => callbacks.onEvent(
+        result.event as NostrEvent,
+        result.sidecar?.relayHints,
+      ),
       () => callbacks.onEose(),
       relayUrl ? { relay: relayUrl } : undefined,
     );
@@ -135,10 +143,11 @@ export function subscribeForPayload(
     for (const relayUrl of relayUrls) {
       subs.push(relay.subscribe(
         filters,
-        (event) => {
+        (result) => {
+          const event = result.event as NostrEvent;
           if (seenIds.has(event.id)) return;
           seenIds.add(event.id);
-          callbacks.onEvent(event as NostrEvent);
+          callbacks.onEvent(event, result.sidecar?.relayHints);
         },
         () => {
           remainingEose -= 1;
@@ -160,12 +169,13 @@ export function subscribeForPayload(
     await shell?.ready();
     if (closed) return;
     const useOutbox = shell?.supports('outbox') ?? false;
+    const isLiveLeg = typeof extraFilterProps?.since === 'number';
 
     if (payload.origin === 'relay') {
       subscription = openPinnedRelays(payload.relays ?? []);
     } else if (useOutbox) {
       // Outbox discovery (NIP-65 author-write relays).
-      subscription = openOutbox({ strategy: 'outbox', live: true });
+      subscription = openOutbox({ strategy: 'outbox', live: isLiveLeg });
     } else {
       // NAP-RELAYS fallback: the runtime selects relays from the filter set.
       subscription = openRelayFallback();

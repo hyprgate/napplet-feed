@@ -22,6 +22,7 @@ vi.mock('@napplet/sdk', () => ({
 }));
 
 const PUBKEY = 'a'.repeat(64);
+type RelayEventResult = { event: NostrEvent };
 
 describe('emoji set store', () => {
   beforeEach(() => {
@@ -39,10 +40,10 @@ describe('emoji set store', () => {
   });
 
   it('uses a kind 10030 user emoji list instead of defaults when present', async () => {
-    let onEvent: ((event: NostrEvent) => void) | null = null;
+    let onEvent: ((result: RelayEventResult) => void) | null = null;
     let onEose: (() => void) | null = null;
     vi.mocked(relay.subscribe).mockImplementation((_filters, eventCallback, eoseCallback) => {
-      onEvent = eventCallback as (event: NostrEvent) => void;
+      onEvent = eventCallback as (result: RelayEventResult) => void;
       onEose = eoseCallback as () => void;
       return { close: vi.fn() };
     });
@@ -51,11 +52,11 @@ describe('emoji set store', () => {
     store.init(PUBKEY);
     await Promise.resolve();
 
-    onEvent!(makeEvent({
+    onEvent!({ event: makeEvent({
       id: 'preferred',
       kind: KIND_USER_EMOJI_LIST,
       tags: [['emoji', 'blobcat', 'https://emoji.example/blobcat.png']],
-    }));
+    }) });
     onEose!();
 
     expect(store.state.activeSource).toBe('preferred');
@@ -112,15 +113,15 @@ describe('emoji set store', () => {
   });
 
   it('publishes emoji sets without replacing existing preferred emoji or set refs', async () => {
-    let onEvent: ((event: NostrEvent) => void) | null = null;
+    let onEvent: ((result: RelayEventResult) => void) | null = null;
     vi.mocked(relay.subscribe).mockImplementation((_filters, eventCallback) => {
-      onEvent = eventCallback as (event: NostrEvent) => void;
+      onEvent = eventCallback as (result: RelayEventResult) => void;
       return { close: vi.fn() };
     });
     const store = createEmojiSetStore();
     store.init(PUBKEY);
     await Promise.resolve();
-    onEvent!(makeEvent({
+    onEvent!({ event: makeEvent({
       id: 'preferred',
       kind: KIND_USER_EMOJI_LIST,
       tags: [
@@ -128,7 +129,7 @@ describe('emoji set store', () => {
         ['a', `${KIND_EMOJI_SET}:${PUBKEY}:old-pack`],
         ['emoji', 'oldcat', 'https://emoji.example/oldcat.png', `${KIND_EMOJI_SET}:${PUBKEY}:old-pack`],
       ],
-    }));
+    }) });
 
     await store.publishEmojiSet({
       identifier: 'cats',
@@ -149,10 +150,10 @@ describe('emoji set store', () => {
   });
 
   it('shows standard unicode emoji from a kind 10030 list (two-element emoji tags)', () => {
-    let onEvent: ((event: NostrEvent) => void) | null = null;
+    let onEvent: ((result: RelayEventResult) => void) | null = null;
     let onEose: (() => void) | null = null;
     vi.mocked(relay.subscribe).mockImplementation((_filters, eventCallback, eoseCallback) => {
-      onEvent = eventCallback as (event: NostrEvent) => void;
+      onEvent = eventCallback as (result: RelayEventResult) => void;
       onEose = eoseCallback as () => void;
       return { close: vi.fn() };
     });
@@ -160,11 +161,11 @@ describe('emoji set store', () => {
     const store = createEmojiSetStore();
     store.init(PUBKEY);
 
-    onEvent!(makeEvent({
+    onEvent!({ event: makeEvent({
       id: 'standard-list',
       kind: KIND_USER_EMOJI_LIST,
       tags: [['emoji', '😀'], ['emoji', '🔥']],
-    }));
+    }) });
     onEose!();
 
     expect(store.state.activeSource).toBe('preferred');
@@ -172,17 +173,17 @@ describe('emoji set store', () => {
   });
 
   it('keeps an explicit Default selection even when a 10030 list exists', () => {
-    let onEvent: ((event: NostrEvent) => void) | null = null;
+    let onEvent: ((result: RelayEventResult) => void) | null = null;
     let onEose: (() => void) | null = null;
     vi.mocked(relay.subscribe).mockImplementation((_filters, eventCallback, eoseCallback) => {
-      onEvent = eventCallback as (event: NostrEvent) => void;
+      onEvent = eventCallback as (result: RelayEventResult) => void;
       onEose = eoseCallback as () => void;
       return { close: vi.fn() };
     });
 
     const store = createEmojiSetStore();
     store.init(PUBKEY);
-    onEvent!(makeEvent({ id: 'l', kind: KIND_USER_EMOJI_LIST, tags: [['emoji', '😀']] }));
+    onEvent!({ event: makeEvent({ id: 'l', kind: KIND_USER_EMOJI_LIST, tags: [['emoji', '😀']] }) });
     onEose!();
     expect(store.state.activeSource).toBe('preferred');
 
@@ -190,7 +191,7 @@ describe('emoji set store', () => {
     expect(store.state.activeSource).toBe('default');
 
     // A later event recompute must not silently switch back to the list.
-    onEvent!(makeEvent({ id: 'l2', kind: KIND_USER_EMOJI_LIST, created_at: 2, tags: [['emoji', '😀'], ['emoji', '🎉']] }));
+    onEvent!({ event: makeEvent({ id: 'l2', kind: KIND_USER_EMOJI_LIST, created_at: 2, tags: [['emoji', '😀'], ['emoji', '🎉']] }) });
     expect(store.state.activeSource).toBe('default');
   });
 

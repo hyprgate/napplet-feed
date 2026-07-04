@@ -155,8 +155,8 @@ describe('feed action click wiring', () => {
     };
     vi.mocked(relay.subscribe).mockImplementation((filters, onEvent) => {
       if (JSON.stringify(filters).includes('"#k":["1063"]')) {
-        onEvent(handler);
-        onEvent({ ...handler, id: '8'.repeat(64), content: '{"name":"Renamed"}' });
+        onEvent({ event: handler });
+        onEvent({ event: { ...handler, id: '8'.repeat(64), content: '{"name":"Renamed"}' } });
       }
       return { close: vi.fn() };
     });

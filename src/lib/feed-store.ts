@@ -18,6 +18,7 @@ import {
   loadMore,
   loadNewNotes,
   setEngagementTargetIds,
+  setDetailedReactions,
   setShowReplies,
   switchSource,
   teardownSubscriptions,
@@ -40,6 +41,7 @@ export interface FeedState {
   source: FeedSource;
   viewMode: ViewMode;
   showReplies: boolean;
+  detailedReactions: boolean;
   error: string | null;
 }
 
@@ -49,6 +51,7 @@ export interface FeedStore {
   switchSource(source: FeedSource): void;
   setViewMode(mode: ViewMode): void;
   setShowReplies(showReplies: boolean): void;
+  setDetailedReactions(detailedReactions: boolean): void;
   /**
    * Drive the feed from an external FeedIntentPayload (intent / persisted).
    * The payload's filters + origin replace the following/global source — the
@@ -85,6 +88,7 @@ export function createFeedStore(onUpdate?: () => void): FeedStore {
       ctx.notify();
     },
     setShowReplies: (showReplies) => setShowReplies(ctx, showReplies),
+    setDetailedReactions: (detailedReactions) => setDetailedReactions(ctx, detailedReactions),
     applyPayload: (payload) => applyExternalPayload(ctx, payload),
     get currentPayload(): FeedIntentPayload | null {
       return ctx.currentPayload;

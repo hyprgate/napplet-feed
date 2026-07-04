@@ -6,6 +6,7 @@ import {
 } from '@hyprgate/utils';
 import { relay } from '@napplet/sdk';
 import { nip19 } from 'nostr-tools';
+import { normalizeRelayHints, relayHintsForEvent } from './event-relay-hints.js';
 
 export const POSITIVE_REACTION = '+' as const;
 export const FEED_REACTION_CLIENT_TAG = ['client', '@hyprgate/feed/reaction'] as const;
@@ -30,7 +31,11 @@ export interface FeedComposeOpenPayload {
   };
 }
 
-export function createFeedNoteOpenPayload(event: Pick<NostrEvent, 'id' | 'kind' | 'pubkey'>): NoteViewerOpenPayload | null {
+export function createFeedNoteOpenPayload(
+  event: NostrEvent,
+  relayHints: readonly string[] = relayHintsForEvent(event),
+): NoteViewerOpenPayload | null {
+  const relays = normalizeRelayHints(relayHints);
   return createNoteViewerOpenPayload({
     target: {
       type: 'event',
@@ -38,6 +43,7 @@ export function createFeedNoteOpenPayload(event: Pick<NostrEvent, 'id' | 'kind' 
       kind: event.kind,
       pubkey: event.pubkey,
     },
+    ...(relays.length > 0 ? { relays } : {}),
     behavior: { focus: true },
     source: { napplet: 'feed' },
   });

@@ -53,8 +53,8 @@
     try {
       subscription = relay.subscribe(
         [{ ids: [id], limit: 1 }],
-        (next: NostrEvent) => {
-          fetchedEvent = next;
+        (result) => {
+          fetchedEvent = result.event as NostrEvent;
           sawEvent = true;
           fetchStatus = 'ready';
         },

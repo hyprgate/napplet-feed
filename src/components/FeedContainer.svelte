@@ -12,6 +12,8 @@
     setViewMode as persistSharedViewMode,
     getShowReplies as loadSharedShowReplies,
     setShowReplies as persistSharedShowReplies,
+    getDetailedReactions as loadSharedDetailedReactions,
+    setDetailedReactions as persistSharedDetailedReactions,
   } from '../lib/feed-storage';
   import FeedList from './FeedList.svelte';
   import FeedCards from './FeedCards.svelte';
@@ -53,6 +55,7 @@
   let error = $state<string | null>(null);
   let viewMode = $state<ViewMode>('compact');
   let showReplies = $state(false);
+  let detailedReactions = $state(false);
   // NSFW is hidden by default; #nsfw-tagged notes only appear when enabled.
   let showNsfw = $state(false);
   let visibleTimeline = $derived(
@@ -75,6 +78,7 @@
     error = s.error;
     viewMode = s.viewMode;
     showReplies = s.showReplies;
+    detailedReactions = s.detailedReactions;
     loadMissingProfiles(nextTimeline);
   }
 
@@ -101,6 +105,11 @@
     store.setShowReplies(next);
     // showReplies is SHARED across windows (FEED-05).
     void persistSharedShowReplies(next);
+  }
+
+  function setDetailedReactions(next: boolean) {
+    store.setDetailedReactions(next);
+    void persistSharedDetailedReactions(next);
   }
 
   function loadNewNotes() {
@@ -256,15 +265,16 @@
     // tiny startup budget so a healthy storage bridge still seeds the first
     // page, but never let a lost storage response block the streaming feed.
     let mounted = true;
-    const prefs = Promise.allSettled([loadSharedViewMode(), loadSharedShowReplies()]);
+    const prefs = Promise.allSettled([loadSharedViewMode(), loadSharedShowReplies(), loadSharedDetailedReactions()]);
     const startupBudget = new Promise<null>((resolve) => {
       window.setTimeout(() => resolve(null), SHARED_PREF_STARTUP_BUDGET_MS);
     });
 
     function applyResolvedPrefs(results: Awaited<typeof prefs>): void {
-      const [viewModeResult, showRepliesResult] = results;
+      const [viewModeResult, showRepliesResult, detailedReactionsResult] = results;
       if (viewModeResult.status === 'fulfilled') store.setViewMode(viewModeResult.value);
       if (showRepliesResult.status === 'fulfilled' && showRepliesResult.value) store.setShowReplies(true);
+      if (detailedReactionsResult.status === 'fulfilled' && detailedReactionsResult.value) store.setDetailedReactions(true);
     }
 
     void Promise.race([prefs, startupBudget]).then((results) => {
@@ -274,8 +284,9 @@
       } else {
         void prefs.then((lateResults) => {
           if (!mounted) return;
-          const [viewModeResult] = lateResults;
+          const [viewModeResult, , detailedReactionsResult] = lateResults;
           if (viewModeResult.status === 'fulfilled') store.setViewMode(viewModeResult.value);
+          if (detailedReactionsResult.status === 'fulfilled') store.setDetailedReactions(detailedReactionsResult.value);
         });
       }
 
@@ -335,6 +346,16 @@
     </button>
 
     <ReactionSettings state={emojiStore.state} store={emojiStore} version={emojiVersion} />
+
+    <button
+      type="button"
+      class="px-2 py-1 text-xs font-mono rounded transition-colors {detailedReactions ? 'bg-accent-green/20 text-accent-green border border-accent-green/40' : 'text-text-muted border border-border-dim hover:text-text-primary'}"
+      aria-pressed={detailedReactions}
+      title="Show reaction kinds"
+      onclick={() => setDetailedReactions(!detailedReactions)}
+    >
+      Detailed reactions
+    </button>
 
     <!-- View mode switcher -->
     <div class="flex gap-1">

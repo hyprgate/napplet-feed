@@ -52,6 +52,8 @@ import {
   setViewMode,
   getShowReplies,
   setShowReplies,
+  getDetailedReactions,
+  setDetailedReactions,
   FEED_STORAGE_KEYS,
 } from './feed-storage';
 import {
@@ -150,6 +152,18 @@ describe('feed-storage — shared (cross-window) scope', () => {
     sharedStore.set(FEED_STORAGE_KEYS.showReplies, 'maybe');
     await expect(getShowReplies()).resolves.toBe(false);
   });
+
+  it('round-trips detailedReactions via the SHARED store', async () => {
+    await setDetailedReactions(true);
+    expect(await getDetailedReactions()).toBe(true);
+    expect(instanceStore.has(FEED_STORAGE_KEYS.detailedReactions)).toBe(false);
+  });
+
+  it('defaults detailedReactions to false when unset or corrupt', async () => {
+    expect(await getDetailedReactions()).toBe(false);
+    sharedStore.set(FEED_STORAGE_KEYS.detailedReactions, 'maybe');
+    await expect(getDetailedReactions()).resolves.toBe(false);
+  });
 });
 
 describe('feed-storage — scope isolation', () => {
@@ -159,6 +173,7 @@ describe('feed-storage — scope isolation', () => {
     await setInstanceSelected('feed-a');
     await setViewMode('terminal');
     await setShowReplies(true);
+    await setDetailedReactions(true);
 
     // Every instance key landed in the instance store only.
     expect([...instanceStore.keys()].sort()).toEqual(
@@ -166,7 +181,7 @@ describe('feed-storage — scope isolation', () => {
     );
     // Every shared key landed in the shared store only.
     expect([...sharedStore.keys()].sort()).toEqual(
-      [FEED_STORAGE_KEYS.viewMode, FEED_STORAGE_KEYS.showReplies].sort(),
+      [FEED_STORAGE_KEYS.viewMode, FEED_STORAGE_KEYS.showReplies, FEED_STORAGE_KEYS.detailedReactions].sort(),
     );
   });
 });

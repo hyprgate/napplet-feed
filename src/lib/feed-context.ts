@@ -36,10 +36,12 @@ export interface FeedContext {
    */
   currentPayload: FeedIntentPayload | null;
   timelinePageInFlight: boolean;
-	  pendingLoadMoreIntent: FeedLoadIntent | null;
-	  timelineRequestId: number;
-	  contactsRequestId: number;
-	  timelinePageTimeout: ReturnType<typeof setTimeout> | null;
+  pendingLoadMoreIntent: FeedLoadIntent | null;
+  timelineRequestId: number;
+  contactsRequestId: number;
+  timelinePageTimeout: ReturnType<typeof setTimeout> | null;
+  reactionCountRequestId: number;
+  reactionCountTargetIds: Set<string>;
 
   contactsSub: Subscription | null;
   timelineSub: Subscription | null;
@@ -65,6 +67,7 @@ export function createFeedContext(notify: () => void): FeedContext {
       source: 'following',
       viewMode: 'compact',
       showReplies: false,
+      detailedReactions: false,
       error: null,
     },
     notify,
@@ -75,10 +78,12 @@ export function createFeedContext(notify: () => void): FeedContext {
     contactPubkeys: [],
     currentPayload: null,
     timelinePageInFlight: false,
-	    pendingLoadMoreIntent: null,
-	    timelineRequestId: 0,
-	    contactsRequestId: 0,
-	    timelinePageTimeout: null,
+    pendingLoadMoreIntent: null,
+    timelineRequestId: 0,
+    contactsRequestId: 0,
+    timelinePageTimeout: null,
+    reactionCountRequestId: 0,
+    reactionCountTargetIds: new Set<string>(),
     contactsSub: null,
     timelineSub: null,
     liveSub: null,

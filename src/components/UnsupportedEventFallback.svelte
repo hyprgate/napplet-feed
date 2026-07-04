@@ -46,7 +46,7 @@
 
   function subscribe(filters: NostrFilter[]): void {
     try {
-      subscriptions.push(relay.subscribe(filters, addHandlerEvent));
+      subscriptions.push(relay.subscribe(filters, (result) => addHandlerEvent(result.event as NostrEvent)));
     } catch {
       // Fallback text remains sufficient when handler discovery is unavailable.
     }
@@ -60,7 +60,8 @@
     try {
       recommendationSub = relay.subscribe(
         [{ kinds: [KIND_APP_HANDLER_RECOMMENDATION], '#d': [String(event.kind)], limit: 12 }],
-        (recommendation: NostrEvent) => {
+        (result) => {
+          const recommendation = result.event as NostrEvent;
           const refs = nip89RecommendationRefsForKind(recommendation, event.kind);
           if (refs.length === 0) return;
           const filters = refs.map((ref) => ({

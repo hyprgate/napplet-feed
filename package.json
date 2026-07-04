@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "paja": "kehto paja --target-url http://localhost:5174 -- pnpm vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
@@ -15,11 +16,11 @@
   "dependencies": {
     "@contextvm/sdk": "^0.7.4",
     "@humanspeak/svelte-markdown": "^1.0.5",
-    "@hyprgate/napplet-ui": "workspace:*",
-    "@hyprgate/types": "workspace:*",
-    "@hyprgate/utils": "workspace:*",
-    "@napplet/sdk": "0.21.0",
-    "@napplet/shim": "0.25.0",
+    "@hyprgate/napplet-ui": "0.0.1",
+    "@hyprgate/types": "0.0.1",
+    "@hyprgate/utils": "0.0.1",
+    "@napplet/sdk": "0.23.0",
+    "@napplet/shim": "0.26.1",
     "applesauce-actions": "5.1.1",
     "applesauce-common": "5.1.0",
     "applesauce-content": "5.0.0",
@@ -30,8 +31,9 @@
     "timeago.js": "4.0.2"
   },
   "devDependencies": {
-    "@napplet/conformance": "^0.3.1",
-    "@napplet/conformance-cli": "^0.2.3",
+    "@kehto/cli": "^0.2.9",
+    "@napplet/conformance": "^0.12.0",
+    "@napplet/conformance-cli": "^0.2.13",
     "@napplet/vite-plugin": "0.10.1",
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "@unocss/reset": "^66.6.7",

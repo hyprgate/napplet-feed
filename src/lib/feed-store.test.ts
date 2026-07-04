@@ -25,15 +25,19 @@ vi.mock('@napplet/sdk', () => ({
     query: vi.fn().mockResolvedValue([]),
     publish: vi.fn().mockResolvedValue({}),
   },
+  count: {
+    query: vi.fn().mockResolvedValue({ ok: true, count: 0 }),
+  },
   outbox: {
     subscribe: vi.fn(),
   },
 }));
 
-import { outbox, relay } from '@napplet/sdk';
+import { count, outbox, relay } from '@napplet/sdk';
 const _subscribe = relay.subscribe;
 const mockSubscribe = vi.mocked(_subscribe);
 const mockOutboxSubscribe = vi.mocked(outbox.subscribe);
+const mockCountQuery = vi.mocked(count.query);
 const mockCloseFn = vi.fn();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -49,11 +53,21 @@ function installShell(supportsOutbox = false): void {
       ready: vi.fn().mockResolvedValue({}),
       supports: vi.fn((domain: string) => (domain === 'outbox' ? supportsOutbox : false)),
     },
+    count: {
+      query: mockCountQuery,
+    },
   };
 }
 
 function makeEvent(id: string, createdAt: number, pubkey = 'pk1', kind = 1, tags: string[][] = [], content = `note ${id}`): NostrEvent {
   return { id, kind, pubkey, created_at: createdAt, tags, content, sig: 'sig' };
+}
+
+type RelayEventResult = { event: NostrEvent };
+type RelayEventCallback = (result: RelayEventResult) => void;
+
+function emitRelayEvent(onEvent: RelayEventCallback | null | undefined, event: NostrEvent): void {
+  onEvent?.({ event });
 }
 
 function makeKind3Event(authorPubkey: string, followPubkeys: string[]): NostrEvent {
@@ -115,6 +129,10 @@ function engagementSubscribeCalls() {
   });
 }
 
+function reactionCountCalls() {
+  return mockCountQuery.mock.calls.map((call) => call[0]);
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('createFeedStore', () => {
@@ -123,6 +141,7 @@ describe('createFeedStore', () => {
     mockCloseFn.mockReset();
     mockSubscribe.mockReturnValue({ close: mockCloseFn });
     mockOutboxSubscribe.mockReturnValue(makeOutboxSub() as unknown as ReturnType<typeof outbox.subscribe>);
+    mockCountQuery.mockResolvedValue({ ok: true, count: 0 });
     installShell(false);
   });
 
@@ -137,6 +156,7 @@ describe('createFeedStore', () => {
     expect(store.state.pendingNew).toEqual([]);
     expect(store.state.source).toBe('following');
     expect(store.state.viewMode).toBe('compact');
+    expect(store.state.detailedReactions).toBe(false);
     expect(store.state.loading).toBe(false);
     expect(store.state.canLoadMore).toBe(false);
     expect(store.state.error).toBe(null);
@@ -205,12 +225,12 @@ describe('createFeedStore', () => {
   });
 
   it('preserves streamed Following events when a newer kind-3 follow list resubscribes', async () => {
-    let contactOnEvent: ((e: NostrEvent) => void) | null = null;
-    let timelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let contactOnEvent: (RelayEventCallback) | null = null;
+    let timelineOnEvent: (RelayEventCallback) | null = null;
     let timelineSubCount = 0;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void) => {
+      (filters: unknown, onEvent: RelayEventCallback) => {
         const filter = (filters as Array<{ kinds?: number[]; since?: number }>)[0];
         if (filter?.kinds?.includes(3)) {
           contactOnEvent = onEvent;
@@ -226,17 +246,17 @@ describe('createFeedStore', () => {
     store.init('user-pubkey');
     await flush();
 
-    contactOnEvent!({
+    emitRelayEvent(contactOnEvent, {
       ...makeKind3Event('user-pubkey', ['a'.repeat(64)]),
       created_at: 1700000000,
     });
     await flush();
-    timelineOnEvent!(makeEvent('note-from-first-follow-set', 2000));
+    emitRelayEvent(timelineOnEvent, makeEvent('note-from-first-follow-set', 2000));
 
     expect(store.state.timeline.map((event) => event.id)).toEqual(['note-from-first-follow-set']);
     expect(timelineSubCount).toBe(1);
 
-    contactOnEvent!({
+    emitRelayEvent(contactOnEvent, {
       ...makeKind3Event('user-pubkey', ['a'.repeat(64), 'b'.repeat(64)]),
       id: 'kind3-newer',
       created_at: 1700000001,
@@ -268,11 +288,11 @@ describe('createFeedStore', () => {
   });
 
   it('pendingNew count increments when live subscription receives new event', async () => {
-    let capturedLiveOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedLiveOnEvent: (RelayEventCallback) | null = null;
     let callCount = 0;
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, _onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, _onEose: () => void) => {
         callCount++;
         if (callCount === 2) capturedLiveOnEvent = onEvent;
         return { close: mockCloseFn };
@@ -284,18 +304,18 @@ describe('createFeedStore', () => {
     await flush();
 
     const event = makeEvent('live1', Date.now());
-    capturedLiveOnEvent!(event);
+    emitRelayEvent(capturedLiveOnEvent, event);
 
     expect(store.state.pendingNew).toHaveLength(1);
     expect(store.state.pendingNew[0]!.id).toBe('live1');
   });
 
   it('live subscription dedupes pending events before they are loaded', async () => {
-    let capturedLiveOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedLiveOnEvent: (RelayEventCallback) | null = null;
     let callCount = 0;
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, _onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, _onEose: () => void) => {
         callCount++;
         if (callCount === 2) capturedLiveOnEvent = onEvent;
         return { close: mockCloseFn };
@@ -307,18 +327,18 @@ describe('createFeedStore', () => {
     await flush();
 
     const event = makeEvent('live-dup', Date.now());
-    capturedLiveOnEvent!(event);
-    capturedLiveOnEvent!(event);
+    emitRelayEvent(capturedLiveOnEvent, event);
+    emitRelayEvent(capturedLiveOnEvent, event);
 
     expect(store.state.pendingNew).toHaveLength(1);
   });
 
   it('streamed timeline insertion does not sort the full timeline per event', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         if (!capturedTimelineOnEvent) {
           capturedTimelineOnEvent = onEvent;
           capturedTimelineOnEose = onEose;
@@ -334,9 +354,9 @@ describe('createFeedStore', () => {
     const sortSpy = vi.spyOn(Array.prototype, 'sort');
     expect(sortSpy).not.toHaveBeenCalled();
     try {
-      capturedTimelineOnEvent!(makeEvent('evt1', 1000));
-      capturedTimelineOnEvent!(makeEvent('evt3', 3000));
-      capturedTimelineOnEvent!(makeEvent('evt2', 2000));
+      emitRelayEvent(capturedTimelineOnEvent, makeEvent('evt1', 1000));
+      emitRelayEvent(capturedTimelineOnEvent, makeEvent('evt3', 3000));
+      emitRelayEvent(capturedTimelineOnEvent, makeEvent('evt2', 2000));
       expect(sortSpy).not.toHaveBeenCalled();
       capturedTimelineOnEose!();
     } finally {
@@ -346,11 +366,11 @@ describe('createFeedStore', () => {
   });
 
   it('applying a new external payload clears stale timeline and enters loading before new events arrive', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         if (!capturedTimelineOnEvent) {
           capturedTimelineOnEvent = onEvent;
           capturedTimelineOnEose = onEose;
@@ -362,7 +382,7 @@ describe('createFeedStore', () => {
     const store = createFeedStore();
     store.switchSource('global');
     await flush();
-    capturedTimelineOnEvent!(makeEvent('global-note', 2000));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('global-note', 2000));
     capturedTimelineOnEose!();
     expect(store.state.timeline.map((event) => event.id)).toEqual(['global-note']);
     expect(store.state.loading).toBe(false);
@@ -384,11 +404,11 @@ describe('createFeedStore', () => {
   });
 
   it('caps a historical page to the requested timeline page size', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         if (!capturedTimelineOnEvent) {
           capturedTimelineOnEvent = onEvent;
           capturedTimelineOnEose = onEose;
@@ -404,7 +424,7 @@ describe('createFeedStore', () => {
     const sortSpy = vi.spyOn(Array.prototype, 'sort');
     try {
       for (let index = 0; index < 500; index++) {
-        capturedTimelineOnEvent!(makeEvent(`evt${index}`, 1000 + ((index * 37) % 500)));
+        emitRelayEvent(capturedTimelineOnEvent, makeEvent(`evt${index}`, 1000 + ((index * 37) % 500)));
       }
       expect(sortSpy).not.toHaveBeenCalled();
       capturedTimelineOnEose!();
@@ -419,11 +439,11 @@ describe('createFeedStore', () => {
   });
 
   it('does not advance the load-more cursor from events beyond the page limit', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         if (!capturedTimelineOnEvent) {
           capturedTimelineOnEvent = onEvent;
           capturedTimelineOnEose = onEose;
@@ -437,9 +457,9 @@ describe('createFeedStore', () => {
     await flush();
 
     for (let index = 0; index < 50; index++) {
-      capturedTimelineOnEvent!(makeEvent(`recent-${index}`, 1000 - index));
+      emitRelayEvent(capturedTimelineOnEvent, makeEvent(`recent-${index}`, 1000 - index));
     }
-    capturedTimelineOnEvent!(makeEvent('stale-straggler', 10));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('stale-straggler', 10));
     capturedTimelineOnEose!();
 
     expect(store.state.timeline).toHaveLength(50);
@@ -457,11 +477,11 @@ describe('createFeedStore', () => {
   });
 
   it('clips sparse page cursors before ancient relay outliers', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         if (!capturedTimelineOnEvent) {
           capturedTimelineOnEvent = onEvent;
           capturedTimelineOnEose = onEose;
@@ -474,9 +494,9 @@ describe('createFeedStore', () => {
     store.switchSource('global');
     await flush();
 
-    capturedTimelineOnEvent!(makeEvent('recent-0', 1_800_000_000));
-    capturedTimelineOnEvent!(makeEvent('recent-1', 1_799_999_900));
-    capturedTimelineOnEvent!(makeEvent('ancient-outlier', 1_650_000_000));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('recent-0', 1_800_000_000));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('recent-1', 1_799_999_900));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('ancient-outlier', 1_650_000_000));
     capturedTimelineOnEose!();
 
     expect(store.state.timeline.map((event) => event.id)).toEqual([
@@ -499,12 +519,12 @@ describe('createFeedStore', () => {
 
   it('advances the load-more cursor when the first page is filtered out', async () => {
     const timelineCallbacks: Array<{
-      onEvent: (e: NostrEvent) => void;
+      onEvent: RelayEventCallback;
       onEose: () => void;
     }> = [];
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         timelineCallbacks.push({ onEvent, onEose });
         return { close: mockCloseFn };
       },
@@ -515,7 +535,8 @@ describe('createFeedStore', () => {
     await flush();
 
     for (let index = 0; index < 50; index++) {
-      timelineCallbacks[0]!.onEvent(
+      emitRelayEvent(
+        timelineCallbacks[0]!.onEvent,
         makeEvent(`reply-${index}`, 2000 - index, 'pk2', 1, [
           ['e', 'root'],
           ['p', 'pk1'],
@@ -540,12 +561,12 @@ describe('createFeedStore', () => {
 
   it('uses larger page limits for urgent reply-dense load-more requests', async () => {
     const timelineCallbacks: Array<{
-      onEvent: (e: NostrEvent) => void;
+      onEvent: RelayEventCallback;
       onEose: () => void;
     }> = [];
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         const filter = (filters as Array<{ kinds?: number[]; since?: number; '#e'?: string[] }>)[0];
         if (filter?.kinds?.includes(1) && filter.since === undefined && filter['#e'] === undefined) {
           timelineCallbacks.push({ onEvent, onEose });
@@ -559,7 +580,7 @@ describe('createFeedStore', () => {
     await flush();
 
     for (let index = 0; index < 50; index++) {
-      timelineCallbacks[0]!.onEvent(makeEvent(`root-${index}`, 3000 - index));
+      emitRelayEvent(timelineCallbacks[0]!.onEvent, makeEvent(`root-${index}`, 3000 - index));
     }
     timelineCallbacks[0]!.onEose();
 
@@ -576,7 +597,8 @@ describe('createFeedStore', () => {
     );
 
     for (let index = 0; index < TIMELINE_PAGE_LIMIT_BY_INTENT.urgent; index++) {
-      timelineCallbacks[1]!.onEvent(
+      emitRelayEvent(
+        timelineCallbacks[1]!.onEvent,
         makeEvent(`reply-${index}`, 2950 - index, 'pk2', 1, [
           ['e', 'root-0'],
           ['p', 'pk1'],
@@ -600,11 +622,11 @@ describe('createFeedStore', () => {
   });
 
   it('selects newest page events by timestamp when cache and relay arrivals interleave', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         if (!capturedTimelineOnEvent) {
           capturedTimelineOnEvent = onEvent;
           capturedTimelineOnEose = onEose;
@@ -617,12 +639,12 @@ describe('createFeedStore', () => {
     store.switchSource('global');
     await flush();
 
-    capturedTimelineOnEvent!(makeEvent('recent', 2000));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('recent', 2000));
     for (let index = 0; index < 49; index++) {
-      capturedTimelineOnEvent!(makeEvent(`old-cache-${index}`, 1000 - index));
+      emitRelayEvent(capturedTimelineOnEvent, makeEvent(`old-cache-${index}`, 1000 - index));
     }
     for (let index = 0; index < 49; index++) {
-      capturedTimelineOnEvent!(makeEvent(`intermediate-relay-${index}`, 1900 - index));
+      emitRelayEvent(capturedTimelineOnEvent, makeEvent(`intermediate-relay-${index}`, 1900 - index));
     }
     capturedTimelineOnEose!();
 
@@ -634,12 +656,12 @@ describe('createFeedStore', () => {
 
   it('queues the strongest loadMore intent while an older page is in flight', async () => {
     const timelineCallbacks: Array<{
-      onEvent: (e: NostrEvent) => void;
+      onEvent: RelayEventCallback;
       onEose: () => void;
     }> = [];
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         const filter = (filters as Array<{ kinds?: number[]; since?: number; '#e'?: string[] }>)[0];
         if (filter?.kinds?.includes(1) && filter.since === undefined && filter['#e'] === undefined) {
           timelineCallbacks.push({ onEvent, onEose });
@@ -652,7 +674,7 @@ describe('createFeedStore', () => {
     store.switchSource('global');
     await flush();
     for (let index = 0; index < 50; index++) {
-      timelineCallbacks[0]!.onEvent(makeEvent(`seed-${index}`, 1000 - index));
+      emitRelayEvent(timelineCallbacks[0]!.onEvent, makeEvent(`seed-${index}`, 1000 - index));
     }
     timelineCallbacks[0]!.onEose();
 
@@ -672,7 +694,7 @@ describe('createFeedStore', () => {
     );
 
     for (let index = 0; index < TIMELINE_PAGE_LIMIT_BY_INTENT.prefetch; index++) {
-      timelineCallbacks[1]!.onEvent(makeEvent(`reply-${index}`, 949 - index, 'pk2', 1, [
+      emitRelayEvent(timelineCallbacks[1]!.onEvent, makeEvent(`reply-${index}`, 949 - index, 'pk2', 1, [
         ['e', 'seed-0'],
         ['p', 'pk1'],
       ]));
@@ -695,12 +717,12 @@ describe('createFeedStore', () => {
     vi.useFakeTimers();
     try {
       const timelineCallbacks: Array<{
-        onEvent: (e: NostrEvent) => void;
+        onEvent: RelayEventCallback;
         onEose: () => void;
       }> = [];
 
       mockSubscribe.mockImplementation(
-        (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+        (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
           const filter = (filters as Array<{ kinds?: number[]; since?: number; '#e'?: string[] }>)[0];
           if (filter?.kinds?.includes(1) && filter.since === undefined && filter['#e'] === undefined) {
             timelineCallbacks.push({ onEvent, onEose });
@@ -715,7 +737,7 @@ describe('createFeedStore', () => {
       await Promise.resolve();
 
       for (let index = 0; index < 50; index++) {
-        timelineCallbacks[0]!.onEvent(makeEvent(`root-${index}`, 2000 - index));
+        emitRelayEvent(timelineCallbacks[0]!.onEvent, makeEvent(`root-${index}`, 2000 - index));
       }
       timelineCallbacks[0]!.onEose();
 
@@ -724,7 +746,7 @@ describe('createFeedStore', () => {
       await Promise.resolve();
 
       for (let index = 0; index < 10; index++) {
-        timelineCallbacks[1]!.onEvent(makeEvent(`slow-reply-${index}`, 1950 - index, 'pk2', 1, [
+        emitRelayEvent(timelineCallbacks[1]!.onEvent, makeEvent(`slow-reply-${index}`, 1950 - index, 'pk2', 1, [
           ['e', 'root-0'],
           ['p', 'pk1'],
         ]));
@@ -752,12 +774,12 @@ describe('createFeedStore', () => {
     }
   });
 
-  it('subscribes to engagement streams for loaded timeline notes', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+  it('uses NAP-COUNT for default reaction counts on loaded timeline notes', async () => {
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         if (!capturedTimelineOnEvent) {
           capturedTimelineOnEvent = onEvent;
           capturedTimelineOnEose = onEose;
@@ -769,11 +791,20 @@ describe('createFeedStore', () => {
     const store = createFeedStore();
     store.switchSource('global');
     await flush();
-    capturedTimelineOnEvent!(makeEvent('note1', 1000));
+    mockCountQuery.mockResolvedValueOnce({ ok: true, count: 4 });
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('note1', 1000));
     capturedTimelineOnEose!();
+    await flushMicrotasks();
 
-    // Engagement subscription uses relay.subscribe directly (not payload-driven),
-    // so it is the first call whose filters target #e.
+    expect(reactionCountCalls()).toEqual([{ kinds: [7], '#e': ['note1'] }]);
+    expect(store.state.engagement.get('note1')).toEqual({
+      reactions: 4,
+      reactionGroups: [],
+      comments: 0,
+      zaps: 0,
+      zapMillisats: 0,
+    });
+
     const engagementCall = mockSubscribe.mock.calls.find((call) => {
       const filters = call[0] as Array<{ '#e'?: string[] }>;
       return filters[0]?.['#e'] !== undefined;
@@ -781,7 +812,6 @@ describe('createFeedStore', () => {
     expect(engagementCall).toBeDefined();
     const filters = engagementCall![0] as Array<{ kinds?: number[]; '#e'?: string[] }>;
     expect(filters).toEqual([
-      { kinds: [7], '#e': ['note1'] },
       { kinds: [1], '#e': ['note1'] },
       { kinds: [1111], '#e': ['note1'] },
       { kinds: [1111], '#E': ['note1'] },
@@ -789,12 +819,99 @@ describe('createFeedStore', () => {
     ]);
   });
 
-  it('coalesces historical page engagement subscription until page completion', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+  it('renders resolved reaction counts without waiting for a stalled count target', async () => {
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
+    let capturedTimelineOnEose: (() => void) | null = null;
+    let stalledCountResolve: ((value: { ok: true; count: number }) => void) | null = null;
+
+    mockSubscribe.mockImplementation(
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
+        if (!capturedTimelineOnEvent) {
+          capturedTimelineOnEvent = onEvent;
+          capturedTimelineOnEose = onEose;
+        }
+        return { close: mockCloseFn };
+      },
+    );
+    mockCountQuery.mockImplementation((filter: unknown) => {
+      const targetId = (filter as { '#e'?: string[] })['#e']?.[0];
+      if (targetId === 'fast-note') return Promise.resolve({ ok: true, count: 6 });
+      return new Promise((resolve) => {
+        stalledCountResolve = resolve as (value: { ok: true; count: number }) => void;
+      });
+    });
+
+    const store = createFeedStore();
+    store.switchSource('global');
+    await flush();
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('fast-note', 1001));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('slow-note', 1000));
+    capturedTimelineOnEose!();
+    await flushMicrotasks();
+
+    expect(reactionCountCalls()).toEqual([
+      { kinds: [7], '#e': ['fast-note'] },
+      { kinds: [7], '#e': ['slow-note'] },
+    ]);
+    expect(store.state.engagement.get('fast-note')).toEqual({
+      reactions: 6,
+      reactionGroups: [],
+      comments: 0,
+      zaps: 0,
+      zapMillisats: 0,
+    });
+    expect(store.state.engagement.get('slow-note')).toBeUndefined();
+
+    stalledCountResolve!({ ok: true, count: 2 });
+    await flushMicrotasks();
+
+    expect(store.state.engagement.get('slow-note')?.reactions).toBe(2);
+  });
+
+  it('keeps count-mode reaction totals when scroll retargets visible notes', async () => {
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
+        if (!capturedTimelineOnEvent) {
+          capturedTimelineOnEvent = onEvent;
+          capturedTimelineOnEose = onEose;
+        }
+        return { close: mockCloseFn };
+      },
+    );
+    mockCountQuery.mockImplementation((filter: unknown) => {
+      const targetId = (filter as { '#e'?: string[] })['#e']?.[0];
+      return Promise.resolve({ ok: true, count: targetId === 'note1' ? 3 : 5 });
+    });
+
+    const store = createFeedStore();
+    store.switchSource('global');
+    await flush();
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('note1', 1001));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('note2', 1000));
+    capturedTimelineOnEose!();
+    await flushMicrotasks();
+
+    expect(store.state.engagement.get('note1')?.reactions).toBe(3);
+    expect(store.state.engagement.get('note2')?.reactions).toBe(5);
+
+    mockCountQuery.mockClear();
+    store.setEngagementTargetIds(['note2']);
+    await flushMicrotasks();
+
+    expect(store.state.engagement.get('note1')?.reactions).toBe(3);
+    expect(store.state.engagement.get('note2')?.reactions).toBe(5);
+    expect(mockCountQuery).not.toHaveBeenCalled();
+  });
+
+  it('coalesces historical page engagement subscription until page completion', async () => {
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
+    let capturedTimelineOnEose: (() => void) | null = null;
+
+    mockSubscribe.mockImplementation(
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         const filter = (filters as Array<{ kinds?: number[]; since?: number; '#e'?: string[] }>)[0];
         if (
           !capturedTimelineOnEvent
@@ -814,12 +931,13 @@ describe('createFeedStore', () => {
     await flush();
 
     for (let index = 0; index < 50; index++) {
-      capturedTimelineOnEvent!(makeEvent(`note-${index}`, 2000 - index));
+      emitRelayEvent(capturedTimelineOnEvent, makeEvent(`note-${index}`, 2000 - index));
     }
 
     expect(engagementSubscribeCalls()).toHaveLength(0);
 
     capturedTimelineOnEose!();
+    await flushMicrotasks();
 
     const calls = engagementSubscribeCalls();
     expect(calls).toHaveLength(1);
@@ -827,14 +945,17 @@ describe('createFeedStore', () => {
     expect(filters[0]?.['#e']).toEqual(
       Array.from({ length: FEED_ENGAGEMENT_TARGET_LIMIT }, (_value, index) => `note-${index}`),
     );
+    expect(reactionCountCalls()).toEqual(
+      Array.from({ length: FEED_ENGAGEMENT_TARGET_LIMIT }, (_value, index) => ({ kinds: [7], '#e': [`note-${index}`] })),
+    );
   });
 
   it('retargets engagement streams to visible timeline notes', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         const filter = (filters as Array<{ kinds?: number[]; since?: number; '#e'?: string[] }>)[0];
         if (
           !capturedTimelineOnEvent
@@ -854,16 +975,21 @@ describe('createFeedStore', () => {
     await flush();
 
     for (let index = 0; index < 50; index++) {
-      capturedTimelineOnEvent!(makeEvent(`note-${index}`, 2000 - index));
+      emitRelayEvent(capturedTimelineOnEvent, makeEvent(`note-${index}`, 2000 - index));
     }
     capturedTimelineOnEose!();
 
     store.setEngagementTargetIds(['note-20', 'note-21', 'missing-note', 'note-20']);
+    await flushMicrotasks();
 
     const calls = engagementSubscribeCalls();
     expect(calls).toHaveLength(2);
     const filters = calls[1]![0] as Array<{ '#e'?: string[] }>;
     expect(filters[0]?.['#e']).toEqual(['note-20', 'note-21']);
+    expect(reactionCountCalls().slice(-2)).toEqual([
+      { kinds: [7], '#e': ['note-20'] },
+      { kinds: [7], '#e': ['note-21'] },
+    ]);
   });
 
   it('subscribes to reply-capable timeline kinds while hiding replies by default', async () => {
@@ -878,11 +1004,11 @@ describe('createFeedStore', () => {
   });
 
   it('excludes kind 1 replies from timeline while showReplies is off', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         if (!capturedTimelineOnEvent) {
           capturedTimelineOnEvent = onEvent;
           capturedTimelineOnEose = onEose;
@@ -895,19 +1021,19 @@ describe('createFeedStore', () => {
     store.switchSource('global');
     await flush();
 
-    capturedTimelineOnEvent!(makeEvent('root', 2000));
-    capturedTimelineOnEvent!(makeEvent('reply', 2100, 'pk2', 1, [['e', 'root'], ['p', 'pk1']]));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('root', 2000));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('reply', 2100, 'pk2', 1, [['e', 'root'], ['p', 'pk1']]));
     capturedTimelineOnEose!();
 
     expect(store.state.timeline.map((event) => event.id)).toEqual(['root']);
   });
 
   it('showReplies reveals cached replies without reopening timeline subscriptions', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         const filter = (filters as Array<{ kinds?: number[]; since?: number }>)[0];
         if (filter?.kinds?.includes(1) && filter.since === undefined && !capturedTimelineOnEvent) {
           capturedTimelineOnEvent = onEvent;
@@ -921,24 +1047,32 @@ describe('createFeedStore', () => {
     store.switchSource('global');
     await flush();
 
-    capturedTimelineOnEvent!(makeEvent('root', 2000));
-    capturedTimelineOnEvent!(makeEvent('kind1-reply', 2100, 'pk2', 1, [['e', 'root'], ['p', 'pk1']]));
-    capturedTimelineOnEvent!(makeEvent('kind1111-reply', 2200, 'pk3', 1111, [['E', 'root'], ['K', '1'], ['P', 'pk1']]));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('root', 2000));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('kind1-reply', 2100, 'pk2', 1, [['e', 'root'], ['p', 'pk1']]));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('kind1111-reply', 2200, 'pk3', 1111, [['E', 'root'], ['K', '1'], ['P', 'pk1']]));
     capturedTimelineOnEose!();
+    await flushMicrotasks();
 
     expect(store.state.timeline.map((event) => event.id)).toEqual(['root']);
+    expect(reactionCountCalls()).toEqual([{ kinds: [7], '#e': ['root'] }]);
 
     const feedSubscriptionCallCount = mockSubscribe.mock.calls.filter((call) => {
       const filters = call[0] as Array<{ kinds?: number[]; '#e'?: string[]; since?: number }>;
       return filters[0]?.['#e'] === undefined && filters[0]?.kinds?.includes(1);
     }).length;
+    mockCountQuery.mockClear();
     store.setShowReplies(true);
+    await flushMicrotasks();
 
     expect(mockSubscribe.mock.calls.filter((call) => {
       const filters = call[0] as Array<{ kinds?: number[]; '#e'?: string[]; since?: number }>;
       return filters[0]?.['#e'] === undefined && filters[0]?.kinds?.includes(1);
     })).toHaveLength(feedSubscriptionCallCount);
     expect(store.state.timeline.map((event) => event.id)).toEqual(['kind1111-reply', 'kind1-reply', 'root']);
+    expect(reactionCountCalls()).toEqual([
+      { kinds: [7], '#e': ['kind1111-reply'] },
+      { kinds: [7], '#e': ['kind1-reply'] },
+    ]);
 
     store.setShowReplies(false);
 
@@ -950,10 +1084,10 @@ describe('createFeedStore', () => {
   });
 
   it('caches hidden live replies instead of putting them in the new-notes banner', async () => {
-    let capturedLiveOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedLiveOnEvent: (RelayEventCallback) | null = null;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void) => {
+      (filters: unknown, onEvent: RelayEventCallback) => {
         const filter = (filters as Array<{ kinds?: number[]; since?: number }>)[0];
         if (filter?.kinds?.includes(1) && filter.since !== undefined) capturedLiveOnEvent = onEvent;
         return { close: mockCloseFn };
@@ -964,7 +1098,7 @@ describe('createFeedStore', () => {
     store.switchSource('global');
     await flush();
 
-    capturedLiveOnEvent!(makeEvent('live-reply', 2300, 'pk2', 1, [['e', 'root'], ['p', 'pk1']]));
+    emitRelayEvent(capturedLiveOnEvent, makeEvent('live-reply', 2300, 'pk2', 1, [['e', 'root'], ['p', 'pk1']]));
 
     expect(store.state.pendingNew).toEqual([]);
     expect(store.state.timeline).toEqual([]);
@@ -996,12 +1130,12 @@ describe('createFeedStore', () => {
   });
 
   it('counts streamed engagement events by target note id with dedupe', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
-    let capturedEngagementOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedEngagementOnEvent: (RelayEventCallback) | null = null;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         const f = filters as Array<{ '#e'?: string[]; since?: number }>;
         if (f[0]?.['#e'] !== undefined) {
           capturedEngagementOnEvent = onEvent;
@@ -1014,16 +1148,17 @@ describe('createFeedStore', () => {
     );
 
     const store = createFeedStore();
+    store.setDetailedReactions(true);
     store.switchSource('global');
     await flush();
-    capturedTimelineOnEvent!(makeEvent('note1', 1000));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('note1', 1000));
     capturedTimelineOnEose!();
     const versionBeforeEngagement = store.state.engagementVersion;
 
-    capturedEngagementOnEvent!(makeEvent('reaction1', 1100, 'pk2', 7, [['e', 'note1']], '+'));
-    capturedEngagementOnEvent!(makeEvent('reaction1', 1100, 'pk2', 7, [['e', 'note1']], '+'));
-    capturedEngagementOnEvent!(makeEvent('comment1', 1101, 'pk3', 1, [['e', 'note1']]));
-    capturedEngagementOnEvent!(makeZapReceipt('zap1', 'note1', 21000));
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('reaction1', 1100, 'pk2', 7, [['e', 'note1']], '+'));
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('reaction1', 1100, 'pk2', 7, [['e', 'note1']], '+'));
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('comment1', 1101, 'pk3', 1, [['e', 'note1']]));
+    emitRelayEvent(capturedEngagementOnEvent, makeZapReceipt('zap1', 'note1', 21000));
 
     expect(store.state.engagement.get('note1')).toEqual({
       reactions: 1,
@@ -1036,12 +1171,12 @@ describe('createFeedStore', () => {
   });
 
   it('matches zap targets and amount from the embedded zap request description', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
-    let capturedEngagementOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedEngagementOnEvent: (RelayEventCallback) | null = null;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         const f = filters as Array<{ '#e'?: string[]; since?: number }>;
         if (f[0]?.['#e'] !== undefined) {
           capturedEngagementOnEvent = onEvent;
@@ -1056,11 +1191,11 @@ describe('createFeedStore', () => {
     const store = createFeedStore();
     store.switchSource('global');
     await flush();
-    capturedTimelineOnEvent!(makeEvent('note1', 1000));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('note1', 1000));
     capturedTimelineOnEose!();
 
-    capturedEngagementOnEvent!(makeZapReceipt('zap1', 'note1', 1000, false));
-    capturedEngagementOnEvent!(makeZapReceipt('zap2', 'note1', 2500, true));
+    emitRelayEvent(capturedEngagementOnEvent, makeZapReceipt('zap1', 'note1', 1000, false));
+    emitRelayEvent(capturedEngagementOnEvent, makeZapReceipt('zap2', 'note1', 2500, true));
 
     expect(store.state.engagement.get('note1')).toMatchObject({
       zaps: 2,
@@ -1069,12 +1204,12 @@ describe('createFeedStore', () => {
   });
 
   it('groups reaction events by content including dislikes and custom emoji shortcodes', async () => {
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
-    let capturedEngagementOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedEngagementOnEvent: (RelayEventCallback) | null = null;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         const f = filters as Array<{ '#e'?: string[]; since?: number }>;
         if (f[0]?.['#e'] !== undefined) {
           capturedEngagementOnEvent = onEvent;
@@ -1087,15 +1222,16 @@ describe('createFeedStore', () => {
     );
 
     const store = createFeedStore();
+    store.setDetailedReactions(true);
     store.switchSource('global');
     await flush();
-    capturedTimelineOnEvent!(makeEvent('note1', 1000));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('note1', 1000));
     capturedTimelineOnEose!();
 
-    capturedEngagementOnEvent!(makeEvent('like1', 1100, 'pk2', 7, [['e', 'note1']], ''));
-    capturedEngagementOnEvent!(makeEvent('like2', 1101, 'pk3', 7, [['e', 'note1']], '+'));
-    capturedEngagementOnEvent!(makeEvent('down1', 1102, 'pk4', 7, [['e', 'note1']], '-'));
-    capturedEngagementOnEvent!(makeEvent('cat1', 1103, 'pk5', 7, [
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('like1', 1100, 'pk2', 7, [['e', 'note1']], ''));
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('like2', 1101, 'pk3', 7, [['e', 'note1']], '+'));
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('down1', 1102, 'pk4', 7, [['e', 'note1']], '-'));
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('cat1', 1103, 'pk5', 7, [
       ['e', 'note1'],
       ['emoji', 'blobcat', 'https://emoji.example/blobcat.png', '30030:pk5:cats'],
     ], ':blobcat:'));
@@ -1105,6 +1241,151 @@ describe('createFeedStore', () => {
       { content: '-', count: 1 },
       { content: ':blobcat:', count: 1, shortcode: 'blobcat', imageUrl: 'https://emoji.example/blobcat.png' },
     ]);
+  });
+
+  it('keeps detailed reaction groups when scroll retargets visible notes', async () => {
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
+    let capturedTimelineOnEose: (() => void) | null = null;
+    let capturedEngagementOnEvent: (RelayEventCallback) | null = null;
+
+    mockSubscribe.mockImplementation(
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
+        const f = filters as Array<{ '#e'?: string[]; since?: number }>;
+        if (f[0]?.['#e'] !== undefined) {
+          capturedEngagementOnEvent = onEvent;
+        } else if (!capturedTimelineOnEvent && f[0]?.since === undefined) {
+          capturedTimelineOnEvent = onEvent;
+          capturedTimelineOnEose = onEose;
+        }
+        return { close: mockCloseFn };
+      },
+    );
+
+    const store = createFeedStore();
+    store.setDetailedReactions(true);
+    store.switchSource('global');
+    await flush();
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('note1', 1001));
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('note2', 1000));
+    capturedTimelineOnEose!();
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('reaction1', 1100, 'pk2', 7, [['e', 'note1']], '+'));
+
+    expect(store.state.engagement.get('note1')?.reactionGroups).toEqual([
+      { content: '+', count: 1 },
+    ]);
+
+    store.setEngagementTargetIds(['note2']);
+
+    expect(store.state.engagement.get('note1')?.reactionGroups).toEqual([
+      { content: '+', count: 1 },
+    ]);
+
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('reaction1', 1100, 'pk2', 7, [['e', 'note1']], '+'));
+
+    expect(store.state.engagement.get('note1')?.reactionGroups).toEqual([
+      { content: '+', count: 1 },
+    ]);
+  });
+
+  it('replaces detailed reaction groups with the shell count when switching back', async () => {
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
+    let capturedTimelineOnEose: (() => void) | null = null;
+    let capturedEngagementOnEvent: (RelayEventCallback) | null = null;
+
+    mockSubscribe.mockImplementation(
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
+        const f = filters as Array<{ '#e'?: string[]; since?: number }>;
+        if (f[0]?.['#e'] !== undefined) {
+          capturedEngagementOnEvent = onEvent;
+        } else if (!capturedTimelineOnEvent && f[0]?.since === undefined) {
+          capturedTimelineOnEvent = onEvent;
+          capturedTimelineOnEose = onEose;
+        }
+        return { close: mockCloseFn };
+      },
+    );
+
+    const store = createFeedStore();
+    store.setDetailedReactions(true);
+    store.switchSource('global');
+    await flush();
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('note1', 1000));
+    capturedTimelineOnEose!();
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('like1', 1100, 'pk2', 7, [['e', 'note1']], '+'));
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('down1', 1101, 'pk3', 7, [['e', 'note1']], '-'));
+
+    expect(store.state.engagement.get('note1')?.reactionGroups).toEqual([
+      { content: '+', count: 1 },
+      { content: '-', count: 1 },
+    ]);
+
+    mockCountQuery.mockResolvedValueOnce({ ok: true, count: 4 });
+    store.setDetailedReactions(false);
+
+    expect(store.state.engagement.get('note1')).toEqual({
+      reactions: 2,
+      reactionGroups: [],
+      comments: 0,
+      zaps: 0,
+      zapMillisats: 0,
+    });
+
+    await flushMicrotasks();
+    expect(store.state.engagement.get('note1')).toEqual({
+      reactions: 4,
+      reactionGroups: [],
+      comments: 0,
+      zaps: 0,
+      zapMillisats: 0,
+    });
+  });
+
+  it('keeps detailed reaction totals when the shell count is unavailable', async () => {
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
+    let capturedTimelineOnEose: (() => void) | null = null;
+    let capturedEngagementOnEvent: (RelayEventCallback) | null = null;
+
+    mockSubscribe.mockImplementation(
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
+        const f = filters as Array<{ '#e'?: string[]; since?: number }>;
+        if (f[0]?.['#e'] !== undefined) {
+          capturedEngagementOnEvent = onEvent;
+        } else if (!capturedTimelineOnEvent && f[0]?.since === undefined) {
+          capturedTimelineOnEvent = onEvent;
+          capturedTimelineOnEose = onEose;
+        }
+        return { close: mockCloseFn };
+      },
+    );
+
+    const store = createFeedStore();
+    store.setDetailedReactions(true);
+    store.switchSource('global');
+    await flush();
+    emitRelayEvent(capturedTimelineOnEvent, makeEvent('note1', 1000));
+    capturedTimelineOnEose!();
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('like1', 1100, 'pk2', 7, [['e', 'note1']], '+'));
+    emitRelayEvent(capturedEngagementOnEvent, makeEvent('like2', 1101, 'pk3', 7, [['e', 'note1']], '+'));
+
+    mockCountQuery.mockResolvedValueOnce({ ok: false, error: 'count-unavailable' });
+    store.setDetailedReactions(false);
+
+    expect(store.state.engagement.get('note1')).toEqual({
+      reactions: 2,
+      reactionGroups: [],
+      comments: 0,
+      zaps: 0,
+      zapMillisats: 0,
+    });
+
+    await flushMicrotasks();
+    expect(store.state.engagement.get('note1')).toEqual({
+      reactions: 2,
+      reactionGroups: [],
+      comments: 0,
+      zaps: 0,
+      zapMillisats: 0,
+    });
   });
 
   it('timeline is sorted by created_at descending', () => {
@@ -1144,10 +1425,10 @@ describe('createFeedStore', () => {
 
   it('init following feed subscribes to kind 3 contacts', async () => {
     let capturedKind3OnEose: (() => void) | null = null;
-    let capturedKind3OnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedKind3OnEvent: (RelayEventCallback) | null = null;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         const filtersArr = filters as Array<{ kinds?: number[] }>;
         if (filtersArr[0]?.kinds?.includes(3)) {
           capturedKind3OnEvent = onEvent;
@@ -1164,7 +1445,7 @@ describe('createFeedStore', () => {
     store.init('mypubkey');
     await flush();
 
-    capturedKind3OnEvent!(kind3);
+    emitRelayEvent(capturedKind3OnEvent, kind3);
     capturedKind3OnEose!();
     await flush();
 
@@ -1179,7 +1460,7 @@ describe('createFeedStore', () => {
 
   it('following init renders known empty state without waiting for contact-list EOSE', async () => {
     mockSubscribe.mockImplementation(
-      (_filters: unknown, _onEvent: (e: NostrEvent) => void, _onEose: () => void) => ({ close: mockCloseFn }),
+      (_filters: unknown, _onEvent: RelayEventCallback, _onEose: () => void) => ({ close: mockCloseFn }),
     );
 
     const store = createFeedStore();
@@ -1196,10 +1477,10 @@ describe('createFeedStore', () => {
   });
 
   it('following init restarts from empty state when a delayed kind-3 contact list streams in', async () => {
-    let capturedKind3OnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedKind3OnEvent: (RelayEventCallback) | null = null;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, _onEose: () => void) => {
+      (filters: unknown, onEvent: RelayEventCallback, _onEose: () => void) => {
         const filtersArr = filters as Array<{ kinds?: number[] }>;
         if (filtersArr[0]?.kinds?.includes(3)) {
           capturedKind3OnEvent = onEvent;
@@ -1217,7 +1498,7 @@ describe('createFeedStore', () => {
       origin: 'outbox',
     });
 
-    capturedKind3OnEvent!(makeKind3Event('mypubkey', ['f1', 'f2']));
+    emitRelayEvent(capturedKind3OnEvent, makeKind3Event('mypubkey', ['f1', 'f2']));
     await flush();
 
     expect(store.currentPayload).toEqual({
@@ -1230,7 +1511,7 @@ describe('createFeedStore', () => {
     vi.useFakeTimers();
     try {
       mockSubscribe.mockImplementation(
-        (_filters: unknown, _onEvent: (e: NostrEvent) => void, _onEose: () => void) => ({ close: mockCloseFn }),
+        (_filters: unknown, _onEvent: RelayEventCallback, _onEose: () => void) => ({ close: mockCloseFn }),
       );
 
       const store = createFeedStore();
@@ -1279,11 +1560,11 @@ describe('createFeedStore', () => {
       expect(store.state.timeline).toEqual([]);
       expect(timelineSub.close).not.toHaveBeenCalled();
 
-      timelineSub.emit('event', makeEvent('late-historical-author-note', 1000, 'a'.repeat(64)));
+      timelineSub.emit('event', { event: makeEvent('late-historical-author-note', 1000, 'a'.repeat(64)) });
 
       expect(store.state.timeline.map((event) => event.id)).toEqual(['late-historical-author-note']);
 
-      timelineSub.emit('eose');
+      timelineSub.emit('closed');
       expect(timelineSub.close).toHaveBeenCalledOnce();
       store.destroy();
     } finally {
@@ -1308,8 +1589,8 @@ describe('createFeedStore', () => {
     });
     await flushMicrotasks();
 
-    contactsSub.emit('event', makeKind3Event('f'.repeat(64), ['b'.repeat(64)]));
-    contactsSub.emit('eose');
+    contactsSub.emit('event', { event: makeKind3Event('f'.repeat(64), ['b'.repeat(64)]) });
+    contactsSub.emit('closed');
 
     expect(contactsSub.close).toHaveBeenCalledOnce();
     expect(store.currentPayload).toEqual({
@@ -1351,10 +1632,10 @@ describe('createFeedStore', () => {
 
   it('synthesizes a following payload (outbox origin) from the resolved follow set', async () => {
     let capturedKind3OnEose: (() => void) | null = null;
-    let capturedKind3OnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedKind3OnEvent: (RelayEventCallback) | null = null;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         const filtersArr = filters as Array<{ kinds?: number[] }>;
         if (filtersArr[0]?.kinds?.includes(3)) {
           capturedKind3OnEvent = onEvent;
@@ -1368,7 +1649,7 @@ describe('createFeedStore', () => {
     store.init('mypubkey');
     await flush();
 
-    capturedKind3OnEvent!(makeKind3Event('mypubkey', ['f1', 'f2']));
+    emitRelayEvent(capturedKind3OnEvent, makeKind3Event('mypubkey', ['f1', 'f2']));
     capturedKind3OnEose!();
     await flush();
 
@@ -1379,11 +1660,11 @@ describe('createFeedStore', () => {
   });
 
   it('uses the NEWEST kind-3 follow list, not a stale/partial one from a fast relay', async () => {
-    let capturedKind3OnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedKind3OnEvent: (RelayEventCallback) | null = null;
     let capturedKind3OnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         const filtersArr = filters as Array<{ kinds?: number[] }>;
         if (filtersArr[0]?.kinds?.includes(3)) {
           capturedKind3OnEvent = onEvent;
@@ -1400,9 +1681,9 @@ describe('createFeedStore', () => {
     store.init('mypubkey');
     await flush();
 
-    capturedKind3OnEvent!(stale);
+    emitRelayEvent(capturedKind3OnEvent, stale);
     await flush();
-    capturedKind3OnEvent!(fresh);
+    emitRelayEvent(capturedKind3OnEvent, fresh);
     capturedKind3OnEose!();
     await flush();
 
@@ -1417,11 +1698,11 @@ describe('createFeedStore', () => {
 
   it('addToTimeline calls onUpdate callback', async () => {
     const onUpdate = vi.fn();
-    let capturedTimelineOnEvent: ((e: NostrEvent) => void) | null = null;
+    let capturedTimelineOnEvent: (RelayEventCallback) | null = null;
     let capturedTimelineOnEose: (() => void) | null = null;
 
     mockSubscribe.mockImplementation(
-      (_filters: unknown, onEvent: (e: NostrEvent) => void, onEose: () => void) => {
+      (_filters: unknown, onEvent: RelayEventCallback, onEose: () => void) => {
         if (!capturedTimelineOnEvent) {
           capturedTimelineOnEvent = onEvent;
           capturedTimelineOnEose = onEose;
@@ -1436,7 +1717,7 @@ describe('createFeedStore', () => {
 
     onUpdate.mockClear();
     const event = makeEvent('evt1', 1000);
-    capturedTimelineOnEvent!(event);
+    emitRelayEvent(capturedTimelineOnEvent, event);
     capturedTimelineOnEose!();
 
     expect(onUpdate).toHaveBeenCalled();

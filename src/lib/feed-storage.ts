@@ -8,7 +8,7 @@
 // (threat T-88-07). This is what makes two intent-opened feeds independent and
 // lets a window restore ITS OWN payload/scroll across reload.
 //
-// SHARED (cross-window) — viewMode, showReplies. Routed through the plain
+// SHARED (cross-window) — viewMode, showReplies, detailedReactions. Routed through the plain
 // storage* helpers: one value visible to every feed window (a global UI pref).
 //
 // Every reader tolerates missing/corrupt persisted data (returns null/default,
@@ -35,6 +35,7 @@ export const FEED_STORAGE_KEYS = {
   // shared (cross-window)
   viewMode: 'feed:viewMode',
   showReplies: 'feed:showReplies',
+  detailedReactions: 'feed:detailedReactions',
 } as const;
 
 const VIEW_MODES: readonly ViewMode[] = ['compact', 'cards', 'terminal'];
@@ -110,4 +111,15 @@ export async function getShowReplies(): Promise<boolean> {
 /** Persist the shared show-replies pref (every feed window). */
 export async function setShowReplies(showReplies: boolean): Promise<void> {
   await storageSetItem(FEED_STORAGE_KEYS.showReplies, showReplies ? 'true' : 'false');
+}
+
+/** Read the shared detailed-reactions pref, defaulting to false. */
+export async function getDetailedReactions(): Promise<boolean> {
+  const raw = await storageGetItem(FEED_STORAGE_KEYS.detailedReactions);
+  return raw === 'true';
+}
+
+/** Persist the shared detailed-reactions pref (every feed window). */
+export async function setDetailedReactions(detailedReactions: boolean): Promise<void> {
+  await storageSetItem(FEED_STORAGE_KEYS.detailedReactions, detailedReactions ? 'true' : 'false');
 }

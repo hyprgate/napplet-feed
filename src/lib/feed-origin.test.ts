@@ -60,7 +60,7 @@ describe('subscribeForPayload', () => {
     delete (globalThis as unknown as { napplet?: unknown }).napplet;
   });
 
-  it('origin:outbox uses outbox.subscribe with strategy:outbox + live (no pin)', async () => {
+  it('origin:outbox uses outbox.subscribe with strategy:outbox and closes the page leg', async () => {
     installShell(true);
     const sub = makeOutboxSub();
     let seenFilters: unknown;
@@ -79,22 +79,37 @@ describe('subscribeForPayload', () => {
 
     expect(relay.subscribe).not.toHaveBeenCalled();
     expect(seenFilters).toEqual([{ kinds: [1] }]);
-    expect(seenOptions).toEqual(expect.objectContaining({ strategy: 'outbox', live: true }));
+    expect(seenOptions).toEqual(expect.objectContaining({ strategy: 'outbox', live: false }));
     expect(seenOptions?.pin).toBeUndefined();
 
-    sub.emit('event', ev('a'));
-    sub.emit('eose');
-    expect(onEvent).toHaveBeenCalledWith(ev('a'));
+    sub.emit('event', { event: ev('a') });
+    sub.emit('closed');
+    expect(onEvent).toHaveBeenCalledWith(ev('a'), undefined);
     expect(onEose).toHaveBeenCalledOnce();
+  });
+
+  it('passes NAP sidecar relay hints with outbox events', async () => {
+    installShell(true);
+    const sub = makeOutboxSub();
+    vi.mocked(outbox.subscribe).mockReturnValue(sub as unknown as ReturnType<typeof outbox.subscribe>);
+    const onEvent = vi.fn();
+
+    subscribeForPayload({ filters: [{ kinds: [1] }], origin: 'outbox' }, { onEvent, onEose: vi.fn() });
+    await flush();
+
+    const event = ev('hinted');
+    sub.emit('event', { event, sidecar: { relayHints: ['wss://relay.example'] } });
+
+    expect(onEvent).toHaveBeenCalledWith(event, ['wss://relay.example']);
   });
 
   it('origin:relay with AUTHOR-BEARING filters uses scoped NAP-RELAYS subscriptions', async () => {
     installShell(true);
     const relaySubs = [{ close: vi.fn() }, { close: vi.fn() }];
-    const onEvents: Array<(event: NostrEvent) => void> = [];
+    const onEvents: Array<(result: { event: NostrEvent }) => void> = [];
     const onEoses: Array<() => void> = [];
     vi.mocked(relay.subscribe).mockImplementation((filters, onEvent, onEose, options) => {
-      onEvents.push(onEvent as (event: NostrEvent) => void);
+      onEvents.push(onEvent as (result: { event: NostrEvent }) => void);
       onEoses.push(onEose);
       expect(filters).toEqual([{ kinds: [1], authors: ['a'.repeat(64), 'b'.repeat(64)] }]);
       return relaySubs[onEvents.length - 1]!;
@@ -118,10 +133,10 @@ describe('subscribeForPayload', () => {
     ]);
 
     const event = ev('a');
-    onEvents[0]!(event);
-    onEvents[1]!(event);
+    onEvents[0]!({ event });
+    onEvents[1]!({ event });
     expect(cbEvent).toHaveBeenCalledOnce();
-    expect(cbEvent).toHaveBeenCalledWith(event);
+    expect(cbEvent).toHaveBeenCalledWith(event, undefined);
 
     onEoses[0]!();
     expect(cbEose).not.toHaveBeenCalled();
@@ -170,11 +185,11 @@ describe('subscribeForPayload', () => {
 
   it('falls back to relay.subscribe when outbox is unsupported (degraded)', async () => {
     installShell(false);
-    let onEvent: ((e: NostrEvent) => void) | undefined;
+    let onEvent: ((result: { event: NostrEvent }) => void) | undefined;
     let onEose: (() => void) | undefined;
     const close = vi.fn();
     vi.mocked(relay.subscribe).mockImplementation((filters, eCb, eoCb) => {
-      onEvent = eCb as (e: NostrEvent) => void;
+      onEvent = eCb as (result: { event: NostrEvent }) => void;
       onEose = eoCb;
       expect(filters).toEqual([{ kinds: [1] }]);
       return { close };
@@ -187,9 +202,9 @@ describe('subscribeForPayload', () => {
     await flush();
 
     expect(outbox.subscribe).not.toHaveBeenCalled();
-    onEvent?.(ev('x'));
+    onEvent?.({ event: ev('x') });
     onEose?.();
-    expect(cbEvent).toHaveBeenCalledWith(ev('x'));
+    expect(cbEvent).toHaveBeenCalledWith(ev('x'), undefined);
     expect(cbEose).toHaveBeenCalledOnce();
   });
 
