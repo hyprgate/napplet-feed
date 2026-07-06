@@ -5,7 +5,7 @@ import { subscribeForPayload } from './feed-origin.js';
 
 vi.mock('@napplet/sdk', () => ({
   relay: { subscribe: vi.fn() },
-  outbox: { subscribe: vi.fn() },
+  outbox: { subscribe: vi.fn(), query: vi.fn() },
 }));
 
 interface FakeOutboxSub {
@@ -53,6 +53,7 @@ describe('subscribeForPayload', () => {
     vi.mocked(outbox.subscribe).mockReturnValue(
       makeOutboxSub() as unknown as ReturnType<typeof outbox.subscribe>,
     );
+    vi.mocked(outbox.query).mockResolvedValue({ events: [] });
     installShell(true);
   });
 
@@ -60,15 +61,14 @@ describe('subscribeForPayload', () => {
     delete (globalThis as unknown as { napplet?: unknown }).napplet;
   });
 
-  it('origin:outbox uses outbox.subscribe with strategy:outbox and closes the page leg', async () => {
+  it('origin:outbox uses outbox.query and closes the page leg', async () => {
     installShell(true);
-    const sub = makeOutboxSub();
     let seenFilters: unknown;
-    let seenOptions: Record<string, unknown> | undefined;
-    vi.mocked(outbox.subscribe).mockImplementation((filters, options) => {
+    let seenOptions: unknown;
+    vi.mocked(outbox.query).mockImplementation(async (filters, options) => {
       seenFilters = filters;
-      seenOptions = options as Record<string, unknown>;
-      return sub as unknown as ReturnType<typeof outbox.subscribe>;
+      seenOptions = options;
+      return { events: [{ event: ev('a') }] };
     });
 
     const payload: FeedIntentPayload = { filters: [{ kinds: [1] }], origin: 'outbox' };
@@ -79,26 +79,22 @@ describe('subscribeForPayload', () => {
 
     expect(relay.subscribe).not.toHaveBeenCalled();
     expect(seenFilters).toEqual([{ kinds: [1] }]);
-    expect(seenOptions).toEqual(expect.objectContaining({ strategy: 'outbox', live: false }));
-    expect(seenOptions?.pin).toBeUndefined();
-
-    sub.emit('event', { event: ev('a') });
-    sub.emit('closed');
+    expect(seenOptions).toBeUndefined();
     expect(onEvent).toHaveBeenCalledWith(ev('a'), undefined);
     expect(onEose).toHaveBeenCalledOnce();
+    expect(outbox.subscribe).not.toHaveBeenCalled();
   });
 
-  it('passes NAP sidecar relay hints with outbox events', async () => {
+  it('passes NAP sidecar relay hints with outbox query events', async () => {
     installShell(true);
-    const sub = makeOutboxSub();
-    vi.mocked(outbox.subscribe).mockReturnValue(sub as unknown as ReturnType<typeof outbox.subscribe>);
+    const event = ev('hinted');
+    vi.mocked(outbox.query).mockResolvedValue({
+      events: [{ event, sidecar: { relayHints: ['wss://relay.example'] } }],
+    });
     const onEvent = vi.fn();
 
     subscribeForPayload({ filters: [{ kinds: [1] }], origin: 'outbox' }, { onEvent, onEose: vi.fn() });
     await flush();
-
-    const event = ev('hinted');
-    sub.emit('event', { event, sidecar: { relayHints: ['wss://relay.example'] } });
 
     expect(onEvent).toHaveBeenCalledWith(event, ['wss://relay.example']);
   });
@@ -211,9 +207,9 @@ describe('subscribeForPayload', () => {
   it('merges extraFilterProps into every filter (page leg: limit+until; live leg: since)', async () => {
     installShell(true);
     let seenFilters: Array<Record<string, unknown>> | undefined;
-    vi.mocked(outbox.subscribe).mockImplementation((filters) => {
+    vi.mocked(outbox.query).mockImplementation(async (filters) => {
       seenFilters = filters as Array<Record<string, unknown>>;
-      return makeOutboxSub() as unknown as ReturnType<typeof outbox.subscribe>;
+      return { events: [] };
     });
 
     const payload: FeedIntentPayload = { filters: [{ kinds: [1] }, { kinds: [6] }], origin: 'outbox' };
@@ -241,17 +237,18 @@ describe('subscribeForPayload', () => {
     await flush();
 
     expect(outbox.subscribe).not.toHaveBeenCalled();
+    expect(outbox.query).not.toHaveBeenCalled();
     expect(relay.subscribe).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
   });
 
-  it('returns a { close } handle that closes the underlying subscription', async () => {
+  it('returns a { close } handle that closes the underlying live subscription', async () => {
     installShell(true);
     const sub = makeOutboxSub();
     vi.mocked(outbox.subscribe).mockReturnValue(sub as unknown as ReturnType<typeof outbox.subscribe>);
 
     const payload: FeedIntentPayload = { filters: [{ kinds: [1] }], origin: 'outbox' };
-    const handle = subscribeForPayload(payload, { onEvent: vi.fn(), onEose: vi.fn() });
+    const handle = subscribeForPayload(payload, { onEvent: vi.fn(), onEose: vi.fn() }, { since: 1000 });
     await flush();
     handle.close();
     expect(sub.close).toHaveBeenCalledOnce();

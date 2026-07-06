@@ -5,8 +5,9 @@
 // by `origin` and returning a uniform { close } handle (same shape as
 // relay.subscribe / profile-metadata's adapter):
 //
-//   origin:'outbox'  → NAP-OUTBOX discovery: outbox.subscribe(filters,
-//                      { strategy:'outbox', live:<leg> }) when supports('outbox'),
+//   origin:'outbox'  → NAP-OUTBOX discovery: outbox.query(filters) for page
+//                      legs, outbox.subscribe(filters) for live legs,
+//                      when supports('outbox'),
 //                      else NAP-RELAYS fallback via relay.subscribe.
 //
 //   origin:'relay'   → NAP-RELAYS exact relay fan-out: one relay.subscribe call
@@ -41,7 +42,6 @@ export interface PayloadSubscriptionCallbacks {
  * intentionally routed via NAP-RELAYS (`relay.subscribe`) below.
  */
 interface FeedOutboxSubscribeOptions {
-  strategy: 'outbox';
   live: boolean;
 }
 
@@ -104,14 +104,26 @@ export function subscribeForPayload(
   }
 
   function openOutbox(options: FeedOutboxSubscribeOptions): Subscription {
-    const sub = outbox.subscribe(filters, options as unknown as Parameters<typeof outbox.subscribe>[1]);
+    if (!options.live) {
+      let queryClosed = false;
+      void outbox.query(filters)
+        .then((result) => {
+          if (queryClosed) return;
+          for (const item of result.events) {
+            callbacks.onEvent(item.event as NostrEvent, item.sidecar?.relayHints);
+          }
+        })
+        .finally(() => {
+          if (!queryClosed) callbacks.onEose();
+        });
+      return { close: () => { queryClosed = true; } };
+    }
+
+    const sub = outbox.subscribe(filters);
     sub.on('event', (result: RelayEventResult) => callbacks.onEvent(
       result.event as NostrEvent,
       result.sidecar?.relayHints,
     ));
-    sub.on('closed', () => {
-      if (!options.live) callbacks.onEose();
-    });
     return { close: () => sub.close() };
   }
 
@@ -175,7 +187,7 @@ export function subscribeForPayload(
       subscription = openPinnedRelays(payload.relays ?? []);
     } else if (useOutbox) {
       // Outbox discovery (NIP-65 author-write relays).
-      subscription = openOutbox({ strategy: 'outbox', live: isLiveLeg });
+      subscription = openOutbox({ live: isLiveLeg });
     } else {
       // NAP-RELAYS fallback: the runtime selects relays from the filter set.
       subscription = openRelayFallback();

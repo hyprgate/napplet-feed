@@ -30,6 +30,7 @@ vi.mock('@napplet/sdk', () => ({
   },
   outbox: {
     subscribe: vi.fn(),
+    query: vi.fn(),
   },
 }));
 
@@ -37,6 +38,7 @@ import { count, outbox, relay } from '@napplet/sdk';
 const _subscribe = relay.subscribe;
 const mockSubscribe = vi.mocked(_subscribe);
 const mockOutboxSubscribe = vi.mocked(outbox.subscribe);
+const mockOutboxQuery = vi.mocked(outbox.query);
 const mockCountQuery = vi.mocked(count.query);
 const mockCloseFn = vi.fn();
 
@@ -65,6 +67,15 @@ function makeEvent(id: string, createdAt: number, pubkey = 'pk1', kind = 1, tags
 
 type RelayEventResult = { event: NostrEvent };
 type RelayEventCallback = (result: RelayEventResult) => void;
+type OutboxQueryFixture = { events: Array<{ event: NostrEvent }> };
+
+function deferredOutboxQuery(): { promise: Promise<OutboxQueryFixture>; resolve: (value: OutboxQueryFixture) => void } {
+  let resolve!: (value: OutboxQueryFixture) => void;
+  const promise = new Promise<OutboxQueryFixture>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 function emitRelayEvent(onEvent: RelayEventCallback | null | undefined, event: NostrEvent): void {
   onEvent?.({ event });
@@ -141,6 +152,7 @@ describe('createFeedStore', () => {
     mockCloseFn.mockReset();
     mockSubscribe.mockReturnValue({ close: mockCloseFn });
     mockOutboxSubscribe.mockReturnValue(makeOutboxSub() as unknown as ReturnType<typeof outbox.subscribe>);
+    mockOutboxQuery.mockResolvedValue({ events: [] });
     mockCountQuery.mockResolvedValue({ ok: true, count: 0 });
     installShell(false);
   });
@@ -1539,11 +1551,10 @@ describe('createFeedStore', () => {
     vi.useFakeTimers();
     try {
       installShell(true);
-      const timelineSub = makeOutboxSub();
       const liveSub = makeOutboxSub();
-      mockOutboxSubscribe
-        .mockReturnValueOnce(timelineSub as unknown as ReturnType<typeof outbox.subscribe>)
-        .mockReturnValueOnce(liveSub as unknown as ReturnType<typeof outbox.subscribe>);
+      const timelineQuery = deferredOutboxQuery();
+      mockOutboxQuery.mockImplementationOnce(() => timelineQuery.promise);
+      mockOutboxSubscribe.mockReturnValueOnce(liveSub as unknown as ReturnType<typeof outbox.subscribe>);
 
       const store = createFeedStore();
       store.applyPayload({
@@ -1558,14 +1569,14 @@ describe('createFeedStore', () => {
 
       expect(store.state.loading).toBe(false);
       expect(store.state.timeline).toEqual([]);
-      expect(timelineSub.close).not.toHaveBeenCalled();
 
-      timelineSub.emit('event', { event: makeEvent('late-historical-author-note', 1000, 'a'.repeat(64)) });
+      timelineQuery.resolve({
+        events: [{ event: makeEvent('late-historical-author-note', 1000, 'a'.repeat(64)) }],
+      });
+      await flushMicrotasks();
 
       expect(store.state.timeline.map((event) => event.id)).toEqual(['late-historical-author-note']);
 
-      timelineSub.emit('closed');
-      expect(timelineSub.close).toHaveBeenCalledOnce();
       store.destroy();
     } finally {
       vi.useRealTimers();
@@ -1574,11 +1585,15 @@ describe('createFeedStore', () => {
 
   it('cancels stale following contact-list callbacks when an external payload arrives during startup', async () => {
     installShell(true);
-    const contactsSub = makeOutboxSub();
-    const externalTimelineSub = makeOutboxSub();
-    mockOutboxSubscribe
-      .mockReturnValueOnce(contactsSub as unknown as ReturnType<typeof outbox.subscribe>)
-      .mockReturnValueOnce(externalTimelineSub as unknown as ReturnType<typeof outbox.subscribe>);
+    const contactsQuery = deferredOutboxQuery();
+    mockOutboxQuery.mockImplementation((filters) => {
+      const first = Array.isArray(filters) ? filters[0] : filters;
+      if ((first as { kinds?: number[] })?.kinds?.includes(3)) {
+        return contactsQuery.promise;
+      }
+      return Promise.resolve({ events: [] });
+    });
+    mockOutboxSubscribe.mockReturnValue(makeOutboxSub() as unknown as ReturnType<typeof outbox.subscribe>);
 
     const store = createFeedStore();
     store.init('f'.repeat(64));
@@ -1589,27 +1604,27 @@ describe('createFeedStore', () => {
     });
     await flushMicrotasks();
 
-    contactsSub.emit('event', { event: makeKind3Event('f'.repeat(64), ['b'.repeat(64)]) });
-    contactsSub.emit('closed');
+    contactsQuery.resolve({
+      events: [{ event: makeKind3Event('f'.repeat(64), ['b'.repeat(64)]) }],
+    });
+    await flushMicrotasks();
 
-    expect(contactsSub.close).toHaveBeenCalledOnce();
     expect(store.currentPayload).toEqual({
       filters: [{ kinds: [1], authors: ['a'.repeat(64)] }],
       origin: 'outbox',
       title: 'hzrd149',
     });
-    expect(mockOutboxSubscribe).toHaveBeenCalledTimes(2);
+    expect(mockOutboxQuery).toHaveBeenCalled();
   });
 
-  it('hard-closes an empty timed-out outbox author page if no relay ever responds', async () => {
+  it('ignores a late empty outbox author page after hard-timeout', async () => {
     vi.useFakeTimers();
     try {
       installShell(true);
-      const timelineSub = makeOutboxSub();
       const liveSub = makeOutboxSub();
-      mockOutboxSubscribe
-        .mockReturnValueOnce(timelineSub as unknown as ReturnType<typeof outbox.subscribe>)
-        .mockReturnValueOnce(liveSub as unknown as ReturnType<typeof outbox.subscribe>);
+      const timelineQuery = deferredOutboxQuery();
+      mockOutboxQuery.mockImplementationOnce(() => timelineQuery.promise);
+      mockOutboxSubscribe.mockReturnValueOnce(liveSub as unknown as ReturnType<typeof outbox.subscribe>);
 
       const store = createFeedStore();
       store.applyPayload({
@@ -1620,10 +1635,14 @@ describe('createFeedStore', () => {
       await flushMicrotasks();
 
       vi.advanceTimersByTime(5000);
-      expect(timelineSub.close).not.toHaveBeenCalled();
+      expect(store.state.loading).toBe(false);
 
       vi.advanceTimersByTime(25_001);
-      expect(timelineSub.close).toHaveBeenCalledOnce();
+      timelineQuery.resolve({
+        events: [{ event: makeEvent('too-late-author-note', 1000, 'a'.repeat(64)) }],
+      });
+      await flushMicrotasks();
+      expect(store.state.timeline).toEqual([]);
       store.destroy();
     } finally {
       vi.useRealTimers();

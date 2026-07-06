@@ -9,6 +9,7 @@ vi.mock('@napplet/sdk', () => ({
   },
   outbox: {
     subscribe: vi.fn(),
+    query: vi.fn(),
   },
 }));
 
@@ -65,6 +66,7 @@ describe('subscribeProfileMetadata', () => {
     vi.mocked(outbox.subscribe).mockReturnValue(
       makeOutboxSub() as unknown as ReturnType<typeof outbox.subscribe>,
     );
+    vi.mocked(outbox.query).mockResolvedValue({ events: [] });
     installShell();
   });
 
@@ -72,13 +74,17 @@ describe('subscribeProfileMetadata', () => {
     delete (globalThis as unknown as { napplet?: unknown }).napplet;
   });
 
-  it('uses outbox.subscribe with the kind-0 author filter (NAP-OUTBOX profile discovery)', async () => {
+  it('uses outbox.query with the kind-0 author filter (NAP-OUTBOX profile discovery)', async () => {
     installShell();
-    const sub = makeOutboxSub();
-    vi.mocked(outbox.subscribe).mockImplementation((filters, options) => {
+    const event = makeProfileEvent('pk1', 100, {
+      name: 'alice',
+      display_name: 'Alice',
+      picture: 'https://example.com/alice.png',
+    });
+    vi.mocked(outbox.query).mockImplementation(async (filters, options) => {
       expect(filters).toEqual([{ kinds: [0], authors: ['pk1'], limit: 1 }]);
-      expect(options).toEqual({ strategy: 'outbox', live: false });
-      return sub as unknown as ReturnType<typeof outbox.subscribe>;
+      expect(options).toBeUndefined();
+      return { events: [{ event }] };
     });
     const received: Array<[string, unknown]> = [];
     const done = vi.fn();
@@ -87,15 +93,7 @@ describe('subscribeProfileMetadata', () => {
     await flush();
 
     expect(relay.subscribe).not.toHaveBeenCalled();
-    sub.emit('closed');
     expect(done).toHaveBeenCalledOnce();
-    expect(sub.close).not.toHaveBeenCalled();
-
-    sub.emit('event', { event: makeProfileEvent('pk1', 100, {
-      name: 'alice',
-      display_name: 'Alice',
-      picture: 'https://example.com/alice.png',
-    }) });
 
     expect(received).toEqual([['pk1', {
       name: 'alice',
@@ -104,23 +102,24 @@ describe('subscribeProfileMetadata', () => {
     }]]);
 
     handle.close();
-    expect(sub.close).toHaveBeenCalledOnce();
+    expect(outbox.subscribe).not.toHaveBeenCalled();
   });
 
   it('keeps the newest metadata event per pubkey and ignores malformed content', async () => {
     installShell();
-    const sub = makeOutboxSub();
-    vi.mocked(outbox.subscribe).mockImplementation(() => {
-      return sub as unknown as ReturnType<typeof outbox.subscribe>;
+    vi.mocked(outbox.query).mockImplementation(async () => {
+      return {
+        events: [
+          { event: makeProfileEvent('pk1', 200, { name: 'new' }) },
+          { event: makeProfileEvent('pk1', 100, { name: 'old' }) },
+          { event: makeProfileEvent('pk1', 300, '{malformed') },
+        ],
+      };
     });
     const received: Array<[string, string | undefined]> = [];
 
     subscribeProfileMetadata(['pk1'], (pubkey, profile) => received.push([pubkey, profile.name]));
     await flush();
-
-    sub.emit('event', { event: makeProfileEvent('pk1', 200, { name: 'new' }) });
-    sub.emit('event', { event: makeProfileEvent('pk1', 100, { name: 'old' }) });
-    sub.emit('event', { event: makeProfileEvent('pk1', 300, '{malformed') });
 
     expect(received).toEqual([['pk1', 'new']]);
   });
@@ -139,7 +138,7 @@ describe('subscribeProfileMetadata', () => {
     subscribeProfileMetadata(['pk1'], (pubkey, profile) => received.push([pubkey, profile.name]));
     await flush();
 
-    expect(outbox.subscribe).not.toHaveBeenCalled();
+    expect(outbox.query).not.toHaveBeenCalled();
     onEvent?.({ event: makeProfileEvent('pk1', 100, { name: 'fallback' }) });
     expect(received).toEqual([['pk1', 'fallback']]);
   });
@@ -154,7 +153,7 @@ describe('subscribeProfileMetadata', () => {
     await flush();
 
     // Closed before the gate resolved: no relay connection is ever opened.
-    expect(outbox.subscribe).not.toHaveBeenCalled();
+    expect(outbox.query).not.toHaveBeenCalled();
     expect(relay.subscribe).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
   });
@@ -168,18 +167,17 @@ describe('subscribeProfileMetadata', () => {
 
   it('uses one limit-1 filter per author so one profile cannot starve the rest', async () => {
     installShell();
-    const sub = makeOutboxSub();
-    vi.mocked(outbox.subscribe).mockImplementation((filters) => {
+    vi.mocked(outbox.query).mockImplementation(async (filters) => {
       expect(filters).toEqual([
         { kinds: [0], authors: ['pk1'], limit: 1 },
         { kinds: [0], authors: ['pk2'], limit: 1 },
       ]);
-      return sub as unknown as ReturnType<typeof outbox.subscribe>;
+      return { events: [] };
     });
 
     subscribeProfileMetadata(['pk1', 'pk2'], () => { /* no-op */ });
     await flush();
 
-    expect(outbox.subscribe).toHaveBeenCalledOnce();
+    expect(outbox.query).toHaveBeenCalledOnce();
   });
 });
