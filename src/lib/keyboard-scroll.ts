@@ -8,9 +8,8 @@
  * to act on. We give the scroller `tabindex="-1"` and handle the keys explicitly so
  * scrolling works regardless of `document.activeElement`.
  *
- * This is NOT a NAP-KEYS regression: the `@napplet/shim` keys-shim forwards
- * PageUp/PageDown without `preventDefault` (no Page* binding exists in the shell
- * keymap), so the keys reach the iframe untouched — there was simply no target.
+ * This is NOT a NAP-KEYS regression: the shell does not bind PageUp/PageDown, so
+ * those keys reach the iframe untouched — there was simply no focused scroll target.
  */
 
 /** Keys this handler acts on. */

@@ -20,7 +20,6 @@
     "@hyprgate/types": "workspace:*",
     "@hyprgate/utils": "workspace:*",
     "@napplet/sdk": "0.24.1",
-    "@napplet/shim": "0.26.3",
     "applesauce-actions": "6.2.0",
     "applesauce-common": "6.2.0",
     "applesauce-content": "6.2.0",
