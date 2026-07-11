@@ -37,6 +37,7 @@ const NOOP_SUBSCRIPTION: ResourceObjectUrlSubscription = { close: () => { /* no-
 const RESOURCE_IMAGE_STALLED_RETRY_MS = 5_000;
 const RESOURCE_IMAGE_RETRY_DELAYS_MS = [500, 1_500, 3_000, 5_000] as const;
 const RESOURCE_IMAGE_BATCH_SIZE = 10;
+const RESOURCE_IMAGE_BATCH_DEBOUNCE_MS = 500;
 const RESOURCE_OBJECT_URL_CACHE_LIMIT = 192;
 
 interface CachedResourceObjectUrlEntry {
@@ -65,7 +66,7 @@ interface BatchedResourceImageGroup {
 }
 
 const pendingBatchedResourceImageJobs: BatchedResourceImageJob[] = [];
-let batchedResourceImageFlushQueued = false;
+let batchedResourceImageFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function normalizeSource(source: string | null | undefined): string | null {
   if (typeof source !== 'string') return null;
@@ -224,9 +225,11 @@ function cancelBatchedResourceImageJob(job: BatchedResourceImageJob): void {
 }
 
 function queueBatchedResourceImageFlush(): void {
-  if (batchedResourceImageFlushQueued) return;
-  batchedResourceImageFlushQueued = true;
-  queueMicrotask(flushBatchedResourceImageJobs);
+  if (batchedResourceImageFlushTimer !== null) return;
+  batchedResourceImageFlushTimer = setTimeout(() => {
+    batchedResourceImageFlushTimer = null;
+    flushBatchedResourceImageJobs();
+  }, RESOURCE_IMAGE_BATCH_DEBOUNCE_MS);
 }
 
 function enqueueBatchedResourceImageJob(job: BatchedResourceImageJob): void {
@@ -235,7 +238,7 @@ function enqueueBatchedResourceImageJob(job: BatchedResourceImageJob): void {
 }
 
 function flushBatchedResourceImageJobs(): void {
-  batchedResourceImageFlushQueued = false;
+  batchedResourceImageFlushTimer = null;
   const jobs = pendingBatchedResourceImageJobs.splice(0).filter((job) => job.active);
   if (jobs.length === 0) return;
 

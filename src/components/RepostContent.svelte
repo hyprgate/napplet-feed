@@ -10,6 +10,7 @@
     profileLabel?: (pubkey: string) => string;
     depth?: number;
     maxDepth?: number;
+    loadResources?: boolean;
   }
 
   let {
@@ -18,15 +19,16 @@
     profileLabel = (pubkey: string) => `${pubkey.slice(0, 12)}...`,
     depth = 0,
     maxDepth = MAX_INLINE_EVENT_DEPTH,
+    loadResources = true,
   }: Props = $props();
   let embedded = $derived(parsedRepostEvent(event));
   let targetId = $derived(embedded?.id ?? repostTargetId(event));
 </script>
 
 {#if embedded}
-  <EventEmbed id={embedded.id} event={embedded} label="repost" {profiles} {profileLabel} depth={depth + 1} {maxDepth} />
+  <EventEmbed id={embedded.id} event={embedded} label="repost" {profiles} {profileLabel} depth={depth + 1} {maxDepth} {loadResources} />
 {:else if targetId}
-  <EventEmbed id={targetId} label="repost" {profiles} {profileLabel} depth={depth + 1} {maxDepth} />
+  <EventEmbed id={targetId} label="repost" {profiles} {profileLabel} depth={depth + 1} {maxDepth} {loadResources} />
 {:else}
   <div class="repost-empty">Repost target unavailable</div>
 {/if}

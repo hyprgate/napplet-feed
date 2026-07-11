@@ -12,9 +12,10 @@
     compact?: boolean;
     /** When false (and not hovered) the counts are visually muted. */
     active?: boolean;
+    loadResources?: boolean;
   }
 
-  let { event, engagement, compact = false, active = false }: Props = $props();
+  let { event, engagement, compact = false, active = false, loadResources = true }: Props = $props();
 
   let counts = $derived(engagement ?? { reactions: 0, reactionGroups: [], comments: 0, zaps: 0, zapMillisats: 0 });
   let reactionGroups = $derived(sortReactionGroups(counts.reactionGroups));
@@ -92,7 +93,7 @@
         onpointercancel={cancelReactionHold}
       >
         {#if group.imageUrl}
-          <img use:resourceImage={group.imageUrl} alt={group.shortcode ?? group.content} loading="lazy" />
+          <img use:resourceImage={loadResources ? group.imageUrl : null} alt={group.shortcode ?? group.content} loading="lazy" />
         {:else}
           <span class="mark reaction-mark">{group.content}</span>
         {/if}

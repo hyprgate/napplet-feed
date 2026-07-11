@@ -1,14 +1,16 @@
-  <script lang="ts">
-    import type { NostrEvent } from 'applesauce-core/helpers/event';
-    import type { EngagementCounts } from '../lib/feed-store';
-	    import {
-	      FEED_LOAD_THRESHOLDS,
-	      getProactiveLoadIntent,
-	      type FeedLoadIntent,
-	    } from '../lib/feed-load-strategy';
-	    import type { EmojiOption } from '../lib/emoji-sets';
-	    import { createEngagementVisibilityTracker } from '../lib/feed-visible-targets';
-	    import NoteEntry from './NoteEntry.svelte';
+<script lang="ts">
+  import { onDestroy } from 'svelte';
+  import type { NostrEvent } from 'applesauce-core/helpers/event';
+  import type { EngagementCounts } from '../lib/feed-store';
+  import {
+    FEED_LOAD_THRESHOLDS,
+    getProactiveLoadIntent,
+    type FeedLoadIntent,
+  } from '../lib/feed-load-strategy';
+  import type { EmojiOption } from '../lib/emoji-sets';
+  import { createFeedResourceVisibilityTracker } from '../lib/feed-resource-visibility';
+  import { createEngagementVisibilityTracker } from '../lib/feed-visible-targets';
+  import NoteEntry from './NoteEntry.svelte';
 
   interface ProfileContent {
     name?: string;
@@ -45,6 +47,21 @@
     () => events,
     () => onVisibleEventsChange,
   );
+  let resourceEventIds = $state(new Set<string>());
+  const resourceVisibility = createFeedResourceVisibilityTracker(
+    () => scroller,
+    () => events,
+    (ids) => {
+      resourceEventIds = new Set(ids);
+    },
+  );
+  const trackResourceVisibility = resourceVisibility.track;
+  onDestroy(resourceVisibility.destroy);
+
+  $effect(() => {
+    events.length;
+    resourceVisibility.refresh();
+  });
 
   function maybeLoadMore(intent: FeedLoadIntent = 'prefetch'): void {
     if (!canLoadMore) return;
@@ -56,6 +73,11 @@
     const remainingPx = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     const intent = getProactiveLoadIntent(remainingPx, scroller.clientHeight);
     if (intent) maybeLoadMore(intent);
+  }
+
+  function handleScroll(): void {
+    loadMoreForScrollPosition();
+    resourceVisibility.refresh();
   }
 
   $effect(() => {
@@ -84,11 +106,23 @@
   });
 </script>
 
-<div bind:this={scroller} class="feed-list overflow-y-auto flex-1" onscroll={loadMoreForScrollPosition}>
+<div bind:this={scroller} class="feed-list overflow-y-auto flex-1" onscroll={handleScroll}>
   <div class="divide-y divide-border-dim">
     {#each events as event (event.id)}
-      <div use:trackEngagementVisibility={event.id}>
-        <NoteEntry {event} {profiles} profile={profiles.get(event.pubkey)} engagement={engagement.get(event.id)} {reactionOptions} />
+      <div
+        use:trackEngagementVisibility={event.id}
+        use:trackResourceVisibility={event.id}
+        data-feed-event-id={event.id}
+        data-feed-resources-enabled={resourceEventIds.has(event.id)}
+      >
+        <NoteEntry
+          {event}
+          {profiles}
+          profile={profiles.get(event.pubkey)}
+          engagement={engagement.get(event.id)}
+          {reactionOptions}
+          loadResources={resourceEventIds.has(event.id)}
+        />
       </div>
     {/each}
   </div>

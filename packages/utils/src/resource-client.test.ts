@@ -418,6 +418,7 @@ describe('resource-client', () => {
   });
 
   it('resourceImageBatch action coalesces mounted images into one bytesMany request', async () => {
+    vi.useFakeTimers();
     stubObjectUrls();
     vi.mocked(resourceBytesMany).mockResolvedValueOnce([
       {
@@ -439,7 +440,13 @@ describe('resource-client', () => {
     const firstAction = resourceImageBatch(first, { source: 'https://example.com/a.png', chunkSize: 10 });
     const secondAction = resourceImageBatch(second, { source: 'https://example.com/b.png', chunkSize: 10 });
 
-    await vi.waitFor(() => expect(first.getAttribute('src')).toBe('blob:batched-1'));
+    await vi.advanceTimersByTimeAsync(499);
+    expect(resourceBytesMany).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+
+    expect(first.getAttribute('src')).toBe('blob:batched-1');
     expect(second.getAttribute('src')).toBe('blob:batched-2');
     expect(resourceBytesMany).toHaveBeenCalledOnce();
     expect(resourceBytesMany).toHaveBeenCalledWith([
@@ -447,6 +454,49 @@ describe('resource-client', () => {
       'https://example.com/b.png',
     ], expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(resourceBytesAsObjectURL).not.toHaveBeenCalled();
+
+    firstAction.destroy?.();
+    secondAction.destroy?.();
+  });
+
+  it('resourceImageBatch keeps staggered image mounts in one debounced bytesMany request', async () => {
+    vi.useFakeTimers();
+    stubObjectUrls();
+    vi.mocked(resourceBytesMany).mockResolvedValueOnce([
+      {
+        url: 'https://example.com/a.png',
+        ok: true,
+        blob: new Blob(['a'], { type: 'image/png' }),
+        mime: 'image/png',
+      },
+      {
+        url: 'https://example.com/b.png',
+        ok: true,
+        blob: new Blob(['b'], { type: 'image/png' }),
+        mime: 'image/png',
+      },
+    ]);
+    const first = document.createElement('img');
+    const second = document.createElement('img');
+
+    const firstAction = resourceImageBatch(first, { source: 'https://example.com/a.png', chunkSize: 10 });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(resourceBytesMany).not.toHaveBeenCalled();
+
+    const secondAction = resourceImageBatch(second, { source: 'https://example.com/b.png', chunkSize: 10 });
+    await vi.advanceTimersByTimeAsync(249);
+    expect(resourceBytesMany).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+
+    expect(resourceBytesMany).toHaveBeenCalledOnce();
+    expect(resourceBytesMany).toHaveBeenCalledWith([
+      'https://example.com/a.png',
+      'https://example.com/b.png',
+    ], expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(first.getAttribute('src')).toBe('blob:batched-1');
+    expect(second.getAttribute('src')).toBe('blob:batched-2');
 
     firstAction.destroy?.();
     secondAction.destroy?.();

@@ -17,6 +17,7 @@
     profileLabel: (pubkey: string) => string;
     depth?: number;
     maxDepth?: number;
+    loadResources?: boolean;
   }
 
   let {
@@ -26,17 +27,18 @@
     profileLabel,
     depth = 0,
     maxDepth = MAX_INLINE_EVENT_DEPTH,
+    loadResources = true,
   }: Props = $props();
 </script>
 
 {#if event.kind === KIND_REPOST}
-  <RepostContent {event} {profiles} {profileLabel} {depth} {maxDepth} />
+  <RepostContent {event} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
 {:else if isFeedRenderableEvent(event)}
-  <ExpandableNoteContent content={event.content} emojiTags={event.tags} {profileLabel} />
-  <FeedEmbeds content={event.content} {profiles} {profileLabel} {depth} {maxDepth} />
+  <ExpandableNoteContent content={event.content} emojiTags={event.tags} {profileLabel} {loadResources} />
+  <FeedEmbeds content={event.content} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
 {:else}
   <UnsupportedEventFallback {event} />
 {/if}
 {#if depth === 0}
-  <NoteActions {event} {reactionOptions} />
+  <NoteActions {event} {reactionOptions} {loadResources} />
 {/if}

@@ -10,9 +10,10 @@
     content: string;
     emojiTags?: string[][];
     profileLabel?: (pubkey: string) => string;
+    loadResources?: boolean;
   }
 
-  let { content, emojiTags = [], profileLabel }: Props = $props();
+  let { content, emojiTags = [], profileLabel, loadResources = true }: Props = $props();
   const FEED_RESOURCE_BATCH_SIZE = 10;
 
   function openProfile(pubkey: string): void {
@@ -42,5 +43,6 @@
   onReferenceClick={openReference}
   onOpenLink={openLink}
   resourceBatchSize={FEED_RESOURCE_BATCH_SIZE}
+  {loadResources}
   videoTitle="Feed video"
 />

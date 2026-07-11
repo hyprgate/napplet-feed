@@ -5,7 +5,7 @@ import {
   type NoteViewerOpenPayload,
 } from '@hyprgate/utils';
 import { relay } from '@napplet/sdk';
-import { nip19 } from 'nostr-tools';
+import * as nip19 from 'nostr-tools/nip19';
 import { normalizeRelayHints, relayHintsForEvent } from './event-relay-hints.js';
 
 export const POSITIVE_REACTION = '+' as const;

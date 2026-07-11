@@ -18,9 +18,10 @@
   interface Props {
     event: NostrEvent;
     reactionOptions?: EmojiOption[];
+    loadResources?: boolean;
   }
 
-  let { event, reactionOptions = [] }: Props = $props();
+  let { event, reactionOptions = [], loadResources = true }: Props = $props();
   let reacting = $state(false);
   let reactionMenuOpen = $state(false);
   let customReaction = $state('');
@@ -71,7 +72,7 @@
           {#each reactionOptions as option}
             <button type="button" role="menuitem" title={option.label} onclick={() => react(reactionInputFromEmojiOption(option))}>
               {#if option.imageUrl}
-                <img use:resourceImage={option.imageUrl} alt={option.label} loading="lazy" />
+                <img use:resourceImage={loadResources ? option.imageUrl : null} alt={option.label} loading="lazy" />
               {:else}
                 {option.content}
               {/if}

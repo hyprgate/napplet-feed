@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 import type { NostrEvent } from '@hyprgate/types';
 import { inc, relay } from '@napplet/sdk';
-import { nip19 } from 'nostr-tools';
+import * as nip19 from 'nostr-tools/nip19';
 import FeedProfileHydrationHarness from './__fixtures__/FeedProfileHydrationHarness.svelte';
 import EventEmbed from './EventEmbed.svelte';
 import FeedNoteContent from './NoteContent.svelte';

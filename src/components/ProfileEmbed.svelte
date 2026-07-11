@@ -2,16 +2,17 @@
   import { onMount } from 'svelte';
   import { inc as ipc } from '@napplet/sdk';
   import { pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
-  import { nip19 } from 'nostr-tools';
+  import * as nip19 from 'nostr-tools/nip19';
   import { subscribeProfileMetadata, type ProfileContent } from '../lib/profile-metadata';
 
   interface Props {
     pubkey: string;
     profile?: ProfileContent;
     profileLabel?: (pubkey: string) => string;
+    loadResources?: boolean;
   }
 
-  let { pubkey, profile: cachedProfile, profileLabel }: Props = $props();
+  let { pubkey, profile: cachedProfile, profileLabel, loadResources = true }: Props = $props();
   let subscribedProfile = $state<ProfileContent | null>(null);
   let status = $state<'loading' | 'ready' | 'empty' | 'error'>('loading');
   let resolvedProfile = $derived(cachedProfile ?? subscribedProfile);
@@ -71,7 +72,7 @@
 >
   <span class="avatar">
     {#if resolvedProfile?.picture}
-      <img use:resourceImage={resolvedProfile.picture} alt="" loading="lazy" />
+      <img use:resourceImage={loadResources ? resolvedProfile.picture : null} alt="" loading="lazy" />
     {:else}
       <span>{fallback}</span>
     {/if}

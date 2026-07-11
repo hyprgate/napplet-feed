@@ -1,6 +1,6 @@
 <script lang="ts">
   import { format } from 'timeago.js';
-  import { nip19 } from 'nostr-tools';
+  import * as nip19 from 'nostr-tools/nip19';
   import type { NostrEvent } from 'applesauce-core/helpers/event';
   import { inc as ipc } from '@napplet/sdk';
   import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
@@ -18,9 +18,10 @@
     profile?: ProfileContent;
     engagement?: EngagementCounts;
     reactionOptions: EmojiOption[];
+    loadResources?: boolean;
   }
 
-  let { event, profiles, profile, engagement, reactionOptions }: Props = $props();
+  let { event, profiles, profile, engagement, reactionOptions, loadResources = true }: Props = $props();
 
   function shortenPubkey(pubkey: string): string {
     try {
@@ -73,7 +74,7 @@
     aria-label="Open profile for {authorName}"
   >
     {#if avatarUrl != null}
-      <img use:resourceImage={avatarUrl} alt={authorName} class="w-full h-full object-cover" loading="lazy" />
+      <img use:resourceImage={loadResources ? avatarUrl : null} alt={authorName} class="w-full h-full object-cover" loading="lazy" />
     {:else}
       <span class="text-text-muted text-xs font-mono">{avatarFallback}</span>
     {/if}
@@ -101,7 +102,7 @@
         <span class="reply-badge">{replyContext.label}</span>
       {/if}
       <div class="ml-auto">
-        <EngagementPills {event} {engagement} compact active={hovered} />
+        <EngagementPills {event} {engagement} compact active={hovered} {loadResources} />
       </div>
     </div>
 
@@ -116,7 +117,7 @@
 
     <!-- Note content -->
     <div class="text-text-primary text-sm leading-relaxed">
-      <FeedEventContent {event} {profiles} {reactionOptions} {profileLabel} />
+      <FeedEventContent {event} {profiles} {reactionOptions} {profileLabel} {loadResources} />
     </div>
   </div>
 </div>

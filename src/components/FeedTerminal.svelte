@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { NostrEvent } from 'applesauce-core/helpers/event';
-  import { nip19 } from 'nostr-tools';
+  import * as nip19 from 'nostr-tools/nip19';
   import { clientTagValue, pubkeyColorStyle } from '@hyprgate/utils';
   import type { EngagementCounts } from '../lib/feed-store';
   import {

@@ -13,6 +13,7 @@
     maxChars?: number;
     maxLines?: number;
     profileLabel?: (pubkey: string) => string;
+    loadResources?: boolean;
   }
 
   let {
@@ -21,6 +22,7 @@
     maxChars = DEFAULT_NOTE_TRUNCATE_CHARS,
     maxLines = DEFAULT_NOTE_TRUNCATE_LINES,
     profileLabel,
+    loadResources = true,
   }: Props = $props();
 
   let expanded = $state(false);
@@ -29,7 +31,7 @@
 </script>
 
 <div class="expandable-note-content">
-  <NoteContent content={visibleContent} {emojiTags} {profileLabel} />
+  <NoteContent content={visibleContent} {emojiTags} {profileLabel} {loadResources} />
   {#if isTruncated}
     <button
       type="button"

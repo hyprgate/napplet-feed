@@ -12,6 +12,7 @@
     profileLabel?: (pubkey: string) => string;
     depth?: number;
     maxDepth?: number;
+    loadResources?: boolean;
   }
 
   let {
@@ -20,6 +21,7 @@
     profileLabel = (pubkey: string) => `${pubkey.slice(0, 12)}...`,
     depth = 0,
     maxDepth = MAX_INLINE_EVENT_DEPTH,
+    loadResources = true,
   }: Props = $props();
   let embeds = $derived(extractNoteContentEmbeds(content, 6, { includeImageUrls: false, includeResources: false }));
   let canRenderNestedEvents = $derived(!isInlineDepthExhausted(depth, maxDepth));
@@ -29,17 +31,17 @@
   <div class="feed-embeds" aria-label="Resolved note references">
     {#each embeds as embed (`${embed.type}:${embed.value}`)}
       {#if embed.type === 'profile'}
-        <ProfileEmbed pubkey={embed.value} profile={profiles.get(embed.value)} {profileLabel} />
+        <ProfileEmbed pubkey={embed.value} profile={profiles.get(embed.value)} {profileLabel} {loadResources} />
       {:else if embed.type === 'event'}
         {#if canRenderNestedEvents}
-          <EventEmbed id={embed.value} {profiles} {profileLabel} depth={depth + 1} {maxDepth} />
+          <EventEmbed id={embed.value} {profiles} {profileLabel} depth={depth + 1} {maxDepth} {loadResources} />
         {:else}
           <div class="depth-limit" data-feed-inline-depth-limit>Nested note limit reached.</div>
         {/if}
       {:else if embed.type === 'media'}
-        <ResourceEmbed source={embed.value} mediaType={embed.mediaType} />
+        <ResourceEmbed source={embed.value} mediaType={embed.mediaType} {loadResources} />
       {:else if embed.type === 'resource'}
-        <ResourceEmbed source={embed.value} mediaType="image" />
+        <ResourceEmbed source={embed.value} mediaType="image" {loadResources} />
       {:else}
         <div class="address-embed">
           <span>address</span>

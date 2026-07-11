@@ -20,6 +20,7 @@
     profileLabel?: (pubkey: string) => string;
     depth?: number;
     maxDepth?: number;
+    loadResources?: boolean;
   }
 
   let {
@@ -30,6 +31,7 @@
     profileLabel = (pubkey: string) => `${pubkey.slice(0, 12)}...`,
     depth = 0,
     maxDepth = MAX_INLINE_EVENT_DEPTH,
+    loadResources = true,
   }: Props = $props();
   let fetchedEvent = $state<NostrEvent | null>(null);
   let fetchStatus = $state<'loading' | 'ready' | 'empty' | 'error'>('loading');
@@ -80,11 +82,11 @@
   {:else if event}
     <div class="embed-body">
       {#if event.kind === KIND_REPOST}
-        <RepostContent {event} {profiles} {profileLabel} {depth} {maxDepth} />
+        <RepostContent {event} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
       {:else if isFeedRenderableEvent(event)}
-        <ExpandableNoteContent content={event.content} emojiTags={event.tags} {profileLabel} />
+        <ExpandableNoteContent content={event.content} emojiTags={event.tags} {profileLabel} {loadResources} />
         {#if canRenderNestedEvents}
-          <FeedEmbeds content={event.content} {profiles} {profileLabel} {depth} {maxDepth} />
+          <FeedEmbeds content={event.content} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
         {:else}
           <div class="depth-limit" data-feed-inline-depth-limit>Nested note limit reached.</div>
         {/if}

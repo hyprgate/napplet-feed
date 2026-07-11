@@ -5,10 +5,12 @@
   interface Props {
     source: string;
     mediaType?: 'image' | 'video';
+    loadResources?: boolean;
   }
 
-  let { source, mediaType = 'image' }: Props = $props();
+  let { source, mediaType = 'image', loadResources = true }: Props = $props();
   let pending = $state(false);
+  let loadedImageSource = $state<string | null>(null);
   let error = $state<string | null>(null);
   const externalVideo = $derived(mediaType === 'video' ? resolveExternalVideoEmbed(source) : null);
 
@@ -46,12 +48,18 @@
 
 <div class="resource-embed">
   {#if mediaType === 'image'}
-    <img use:resourceImage={source} alt="embedded resource" loading="lazy" />
+    <img
+      class:resource-pending={loadedImageSource !== source}
+      use:resourceImage={loadResources ? source : null}
+      alt="embedded resource"
+      loading="lazy"
+      onload={() => (loadedImageSource = source)}
+    />
   {:else if externalVideo}
     <a class="provider-card" href={source} target="_blank" rel="noopener noreferrer" onclick={(e) => void openProviderLink(e)}>
       <span class="provider-art" class:empty={!externalVideo.thumbnailUrl}>
         {#if externalVideo.thumbnailUrl}
-          <img use:resourceImage={externalVideo.thumbnailUrl} alt="" loading="lazy" />
+          <img use:resourceImage={loadResources ? externalVideo.thumbnailUrl : null} alt="" loading="lazy" />
         {:else}
           <span>{externalVideo.provider.slice(0, 1).toUpperCase()}</span>
         {/if}
@@ -92,6 +100,12 @@
     max-width: 100%;
     max-height: 280px;
     object-fit: contain;
+  }
+
+  img.resource-pending {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: var(--hg-bg-base, #050505);
   }
 
   .provider-card {

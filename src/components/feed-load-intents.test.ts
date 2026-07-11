@@ -122,22 +122,27 @@ describe('feed proactive load intents', () => {
     await tick();
     await tick();
 
-    expect(observerInstances.map((observer) => observer.rootMargin)).toEqual([
+    const loadObservers = observerInstances.filter((observer) => observer.rootMargin !== '0px');
+    expect(loadObservers.map((observer) => observer.rootMargin)).toEqual([
       '0px 0px 30% 0px',
       '0px 0px 20% 0px',
       '0px 0px 10% 0px',
     ]);
 
-    observerInstances[2]!.callback(
+    const callsBeforeObserver = onLoadMore.mock.calls.length;
+    loadObservers[2]!.callback(
       [{ isIntersecting: true } as IntersectionObserverEntry],
       {} as IntersectionObserver,
     );
+    expect(onLoadMore).toHaveBeenCalledTimes(callsBeforeObserver + 1);
     expect(onLoadMore).toHaveBeenLastCalledWith('urgent');
 
     const scroller = document.querySelector(scrollerSelector);
     expect(scroller).toBeDefined();
     setScrollGeometry(scroller!, 900);
+    const callsBeforeScroll = onLoadMore.mock.calls.length;
     scroller!.dispatchEvent(new Event('scroll'));
+    expect(onLoadMore).toHaveBeenCalledTimes(callsBeforeScroll + 1);
     expect(onLoadMore).toHaveBeenLastCalledWith('urgent');
 
     unmount(mounted);

@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { NostrEvent } from 'applesauce-core/helpers/event';
   import { format } from 'timeago.js';
-  import { nip19 } from 'nostr-tools';
+  import * as nip19 from 'nostr-tools/nip19';
   import { inc as ipc } from '@napplet/sdk';
   import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
   import type { EngagementCounts } from '../lib/feed-store';
@@ -11,6 +12,7 @@
     type FeedLoadIntent,
   } from '../lib/feed-load-strategy';
   import type { EmojiOption } from '../lib/emoji-sets';
+  import { createFeedResourceVisibilityTracker } from '../lib/feed-resource-visibility';
   import { createEngagementVisibilityTracker } from '../lib/feed-visible-targets';
   import { attachScrollKeyListener } from '../lib/keyboard-scroll';
   import type { ProfileContent } from '../lib/profile-metadata';
@@ -71,6 +73,21 @@
     () => events,
     () => onVisibleEventsChange,
   );
+  let resourceEventIds = $state(new Set<string>());
+  const resourceVisibility = createFeedResourceVisibilityTracker(
+    () => scroller,
+    () => events,
+    (ids) => {
+      resourceEventIds = new Set(ids);
+    },
+  );
+  const trackResourceVisibility = resourceVisibility.track;
+  onDestroy(resourceVisibility.destroy);
+
+  $effect(() => {
+    events.length;
+    resourceVisibility.refresh();
+  });
 
   function maybeLoadMore(intent: FeedLoadIntent = 'prefetch'): void {
     if (!canLoadMore) return;
@@ -82,6 +99,11 @@
     const remainingPx = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     const intent = getProactiveLoadIntent(remainingPx, scroller.clientHeight);
     if (intent) maybeLoadMore(intent);
+  }
+
+  function handleScroll(): void {
+    loadMoreForScrollPosition();
+    resourceVisibility.refresh();
   }
 
   // Issue #183: PageUp/PageDown/Home/End scroll the container explicitly, so they
@@ -121,7 +143,7 @@
   tabindex="-1"
   role="group"
   aria-label="Feed"
-  onscroll={loadMoreForScrollPosition}
+  onscroll={handleScroll}
 >
   {#each events as event (event.id)}
     {@const profile = profiles.get(event.pubkey)}
@@ -130,6 +152,9 @@
     <div
       class="border border-border-dim rounded p-3 mb-2 bg-bg-surface hover:bg-bg-overlay transition-colors"
       use:trackEngagementVisibility={event.id}
+      use:trackResourceVisibility={event.id}
+      data-feed-event-id={event.id}
+      data-feed-resources-enabled={resourceEventIds.has(event.id)}
       onpointerenter={() => (hoveredCardId = event.id)}
       onpointerleave={() => { if (hoveredCardId === event.id) hoveredCardId = null; }}
     >
@@ -142,7 +167,7 @@
           aria-label="Open profile"
         >
           {#if profile?.picture != null}
-            <img use:resourceImage={profile.picture} alt={getAuthorName(event.pubkey, profile)} class="w-full h-full object-cover" loading="lazy" />
+            <img use:resourceImage={resourceEventIds.has(event.id) ? profile.picture : null} alt={getAuthorName(event.pubkey, profile)} class="w-full h-full object-cover" loading="lazy" />
           {:else}
             <span class="text-text-muted text-sm font-mono">
               {(profile?.name ?? event.pubkey).slice(0, 2).toUpperCase()}
@@ -171,7 +196,7 @@
           </div>
         </div>
         <div class="ml-auto">
-          <EngagementPills {event} engagement={counts} active={hoveredCardId === event.id} />
+          <EngagementPills {event} engagement={counts} active={hoveredCardId === event.id} loadResources={resourceEventIds.has(event.id)} />
         </div>
       </div>
       {#if replyContext}
@@ -184,7 +209,7 @@
       {/if}
       <!-- Content -->
       <div class="text-text-primary text-sm leading-relaxed">
-        <FeedEventContent {event} {profiles} {reactionOptions} {profileLabel} />
+        <FeedEventContent {event} {profiles} {reactionOptions} {profileLabel} loadResources={resourceEventIds.has(event.id)} />
       </div>
     </div>
   {/each}
