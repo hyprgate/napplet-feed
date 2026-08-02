@@ -32,10 +32,13 @@ export { normalizeReactionContent } from './feed-context.js';
 const EMPTY_FOLLOWING_AUTHOR = '0'.repeat(64);
 const TIMELINE_PAGE_EOSE_TIMEOUT_MS = 5000;
 const URGENT_TIMELINE_PAGE_TIMEOUT_MS = 2000;
-const EMPTY_AUTHOR_PAGE_GRACE_CLOSE_MS = 25_000;
+// TEMPORARY (napplet/web#167): NAP-OUTBOX has no napplet-visible progressive,
+// bounded history lifecycle. The shell closes this opted-in historical stream
+// after fallback and late NIP-65 relays finish; live streams omit the option.
+const OUTBOX_PAGE_COLLECTION_TIMEOUT_MS = 20_000;
 export const SPARSE_PAGE_CURSOR_GAP_SECONDS = 7 * 24 * 60 * 60;
 export const TIMELINE_CACHE_LIMIT = TIMELINE_PAGE_LIMIT * 20;
-type TimelinePageCompletion = 'eose' | 'timeout' | 'hard-timeout';
+type TimelinePageCompletion = 'eose' | 'timeout';
 
 // ── Timeline helpers ──────────────────────────────────────────────────────
 
@@ -204,21 +207,6 @@ function clearTimelinePageTimeout(ctx: FeedContext): void {
   ctx.timelinePageTimeout = null;
 }
 
-function isOutboxAuthorPayload(payload: FeedIntentPayload | null): boolean {
-  return payload?.origin === 'outbox'
-    && payload.filters.some((filter) => Array.isArray(filter.authors) && filter.authors.length > 0);
-}
-
-function shouldKeepEmptyTimedOutPageOpen(
-  ctx: FeedContext,
-  pageCandidates: NostrEvent[],
-  completion: TimelinePageCompletion,
-): boolean {
-  return completion === 'timeout'
-    && pageCandidates.length === 0
-    && isOutboxAuthorPayload(ctx.currentPayload);
-}
-
 function finalizeTimelinePage(
   ctx: FeedContext,
   requestId: number,
@@ -228,16 +216,8 @@ function finalizeTimelinePage(
 ): void {
   if (requestId !== ctx.timelineRequestId) return;
   clearTimelinePageTimeout(ctx);
-  if (shouldKeepEmptyTimedOutPageOpen(ctx, pageCandidates, completion)) {
-    // Author outbox discovery can attach the useful relay after the UI timeout.
-    // Keep the historical leg alive briefly so late old notes can still render.
-    ctx.timelinePageTimeout = setTimeout(() => {
-      finalizeTimelinePage(ctx, requestId, pageCandidates, pageLimit, 'hard-timeout');
-    }, EMPTY_AUTHOR_PAGE_GRACE_CLOSE_MS);
-  } else {
-    ctx.timelineSub?.close();
-    ctx.timelineSub = null;
-  }
+  ctx.timelineSub?.close();
+  ctx.timelineSub = null;
   commitPageCursor(ctx, pageCandidates, pageLimit, completion);
   ctx.timelinePageInFlight = false;
   ctx.state.loading = false;
@@ -245,7 +225,9 @@ function finalizeTimelinePage(
   syncEngagementSubscription(ctx);
   const pendingIntent = ctx.pendingLoadMoreIntent;
   ctx.pendingLoadMoreIntent = null;
-  if (pendingIntent && ctx.state.canLoadMore) startLoadMorePage(ctx, pendingIntent);
+  if (pendingIntent && ctx.state.canLoadMore) {
+    startLoadMorePage(ctx, pendingIntent);
+  }
 }
 
 export function teardownSubscriptions(ctx: FeedContext): void {
@@ -284,9 +266,36 @@ function startTimelineSubscription(
   const pageCandidates: NostrEvent[] = [];
   const pageCandidateIds = new Set<string>();
   const acceptedPageIds = new Set<string>();
+  let pageUsesOutbox = false;
+  let pageWatchdogStarted = false;
+  let pageWatchdogElapsed = false;
   ctx.state.loading = true;
   ctx.timelinePageInFlight = true;
   ctx.notify();
+
+  function startPageWatchdog(): void {
+    if (pageWatchdogStarted || requestId !== ctx.timelineRequestId) return;
+    pageWatchdogStarted = true;
+    clearTimelinePageTimeout(ctx);
+    ctx.timelinePageTimeout = setTimeout(() => {
+      if (pageUsesOutbox) {
+        // Render and expose the current cursor on the regular page deadline,
+        // while the one finite history stream remains open for late NIP-65
+        // results. A queued next page starts only once this stream closes.
+        pageWatchdogElapsed = true;
+        commitPageCursor(ctx, pageCandidates, pageLimit, 'timeout');
+        ctx.state.loading = false;
+        ctx.notify();
+        return;
+      }
+      finishPage('timeout');
+    }, timeoutMs);
+  }
+
+  function finishPage(completion: TimelinePageCompletion): void {
+    if (requestId !== ctx.timelineRequestId) return;
+    finalizeTimelinePage(ctx, requestId, pageCandidates, pageLimit, completion);
+  }
 
   ctx.timelineSub = subscribeForPayload(
     payload,
@@ -298,17 +307,30 @@ function startTimelineSubscription(
         pageCandidateIds.add(event.id);
         insertPageCandidate(pageCandidates, event);
         applyTimelinePageSelection(ctx, pageCandidates, acceptedPageIds, pageLimit);
+        if (pageWatchdogElapsed) {
+          commitPageCursor(ctx, pageCandidates, pageLimit, 'timeout');
+          ctx.notify();
+          return;
+        }
+        if (ctx.state.loading) {
+          // An OUTBOX stream has no relay EOSE. Render the first received page
+          // event immediately instead of holding the visible feed behind the
+          // page watchdog while late NIP-65 discovery continues in the background.
+          ctx.state.loading = false;
+          ctx.notify();
+        }
       },
-      onEose: () => {
-        finalizeTimelinePage(ctx, requestId, pageCandidates, pageLimit, 'eose');
+      onEose: (reason) => {
+        finishPage(reason === 'timeout' ? 'timeout' : 'eose');
+      },
+      onRoute: (route) => {
+        pageUsesOutbox = route === 'outbox';
+        startPageWatchdog();
       },
     },
     { ...extra, limit: pageLimit },
+    payload.origin === 'outbox' ? { timeoutMs: OUTBOX_PAGE_COLLECTION_TIMEOUT_MS } : undefined,
   );
-  clearTimelinePageTimeout(ctx);
-  ctx.timelinePageTimeout = setTimeout(() => {
-    finalizeTimelinePage(ctx, requestId, pageCandidates, pageLimit, 'timeout');
-  }, timeoutMs);
 }
 
 /** Open the live (future events) subscription from the active payload. */

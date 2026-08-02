@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { inc as ipc } from '@napplet/sdk';
-  import { NOTE_VIEWER_OPEN_TOPIC } from '@hyprgate/utils';
+  import { createFeedNoteIntentRequestFromPayload, invokeFeedIntent } from '../lib/feed-actions';
   import {
     createReplyReferenceOpenPayload,
     type ReplyContextReferenceDisplay,
@@ -12,10 +11,10 @@
 
   let { reference }: Props = $props();
 
-  function openReference(): void {
+  async function openReference(): Promise<void> {
     const payload = createReplyReferenceOpenPayload(reference);
-    if (!payload) return;
-    ipc.emit(NOTE_VIEWER_OPEN_TOPIC, [], JSON.stringify(payload));
+    const request = payload ? createFeedNoteIntentRequestFromPayload(payload) : null;
+    if (request) await invokeFeedIntent(request);
   }
 </script>
 

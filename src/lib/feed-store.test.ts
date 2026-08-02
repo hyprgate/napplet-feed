@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { NostrEvent } from '@hyprgate/types';
 import { KIND_ZAP_RECEIPT, KIND_ZAP_REQUEST } from '@hyprgate/utils';
 import { createFeedStore } from './feed-store';
-import { TIMELINE_CACHE_LIMIT } from './feed-engine';
+import { TIMELINE_CACHE_LIMIT, TIMELINE_PAGE_LIMIT } from './feed-engine';
 import { FEED_ENGAGEMENT_TARGET_LIMIT } from './feed-engagement';
 import { TIMELINE_PAGE_LIMIT_BY_INTENT } from './feed-load-strategy';
 
@@ -67,16 +67,6 @@ function makeEvent(id: string, createdAt: number, pubkey = 'pk1', kind = 1, tags
 
 type RelayEventResult = { event: NostrEvent };
 type RelayEventCallback = (result: RelayEventResult) => void;
-type OutboxQueryFixture = { events: Array<{ event: NostrEvent }> };
-
-function deferredOutboxQuery(): { promise: Promise<OutboxQueryFixture>; resolve: (value: OutboxQueryFixture) => void } {
-  let resolve!: (value: OutboxQueryFixture) => void;
-  const promise = new Promise<OutboxQueryFixture>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
-
 function emitRelayEvent(onEvent: RelayEventCallback | null | undefined, event: NostrEvent): void {
   onEvent?.({ event });
 }
@@ -1547,14 +1537,49 @@ describe('createFeedStore', () => {
     }
   });
 
-  it('keeps an empty timed-out outbox author page open so late historical events can populate before refresh', async () => {
+  it('starts the page watchdog after shell readiness, not before the route opens', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveReady: () => void = () => {};
+      const ready = new Promise<void>((resolve) => {
+        resolveReady = resolve;
+      });
+      (globalThis as unknown as { napplet: unknown }).napplet = {
+        shell: {
+          ready: vi.fn(() => ready),
+          supports: vi.fn((domain: string) => domain === 'outbox'),
+        },
+      };
+
+      const store = createFeedStore();
+      store.applyPayload({ filters: [{ kinds: [1] }], origin: 'outbox' });
+      await flushMicrotasks();
+
+      vi.advanceTimersByTime(5000);
+      expect(store.state.loading).toBe(true);
+      expect(mockOutboxSubscribe).not.toHaveBeenCalled();
+
+      resolveReady();
+      await flushMicrotasks();
+      expect(mockOutboxSubscribe).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(5000);
+      expect(store.state.loading).toBe(false);
+      store.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps an initially quiet outbox author page open until its finite stream closes', async () => {
     vi.useFakeTimers();
     try {
       installShell(true);
+      const timelineSub = makeOutboxSub();
       const liveSub = makeOutboxSub();
-      const timelineQuery = deferredOutboxQuery();
-      mockOutboxQuery.mockImplementationOnce(() => timelineQuery.promise);
-      mockOutboxSubscribe.mockReturnValueOnce(liveSub as unknown as ReturnType<typeof outbox.subscribe>);
+      mockOutboxSubscribe
+        .mockReturnValueOnce(timelineSub as unknown as ReturnType<typeof outbox.subscribe>)
+        .mockReturnValueOnce(liveSub as unknown as ReturnType<typeof outbox.subscribe>);
 
       const store = createFeedStore();
       store.applyPayload({
@@ -1570,12 +1595,75 @@ describe('createFeedStore', () => {
       expect(store.state.loading).toBe(false);
       expect(store.state.timeline).toEqual([]);
 
-      timelineQuery.resolve({
-        events: [{ event: makeEvent('late-historical-author-note', 1000, 'a'.repeat(64)) }],
+      timelineSub.emit('event', { event: makeEvent('late-historical-author-note', 1000, 'a'.repeat(64)) });
+
+      expect(store.state.timeline.map((event) => event.id)).toEqual(['late-historical-author-note']);
+      expect(store.state.canLoadMore).toBe(true);
+      expect(mockOutboxQuery).not.toHaveBeenCalled();
+
+      timelineSub.emit('closed');
+      await flushMicrotasks();
+      expect(timelineSub.close).toHaveBeenCalledOnce();
+      expect(mockOutboxSubscribe).toHaveBeenCalledTimes(2);
+
+      store.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('collects late NIP-65 history before starting a queued full-page pagination request', async () => {
+    vi.useFakeTimers();
+    try {
+      installShell(true);
+      const timelineSub = makeOutboxSub();
+      const liveSub = makeOutboxSub();
+      mockOutboxSubscribe
+        .mockReturnValueOnce(timelineSub as unknown as ReturnType<typeof outbox.subscribe>)
+        .mockReturnValueOnce(liveSub as unknown as ReturnType<typeof outbox.subscribe>);
+
+      const store = createFeedStore();
+      store.applyPayload({
+        filters: [{ kinds: [1], authors: ['a'.repeat(64)] }],
+        origin: 'outbox',
+        title: 'hzrd149',
       });
       await flushMicrotasks();
 
-      expect(store.state.timeline.map((event) => event.id)).toEqual(['late-historical-author-note']);
+      expect(mockOutboxSubscribe).toHaveBeenNthCalledWith(
+        1,
+        [{ kinds: [1], authors: ['a'.repeat(64)], limit: TIMELINE_PAGE_LIMIT }],
+        { timeoutMs: 20_000 },
+      );
+      expect(mockOutboxSubscribe).toHaveBeenNthCalledWith(
+        2,
+        [{ kinds: [1], authors: ['a'.repeat(64)], since: expect.any(Number) }],
+      );
+
+      for (let index = 0; index < TIMELINE_PAGE_LIMIT; index++) {
+        timelineSub.emit('event', {
+          event: makeEvent(`fallback-history-${index}`, 2000 - index, 'a'.repeat(64)),
+        });
+      }
+      expect(store.state.loading).toBe(false);
+      expect(store.state.timeline).toHaveLength(TIMELINE_PAGE_LIMIT);
+
+      // A viewport request queues while the finite page collects late author
+      // relays; it must run as soon as the shell reports completion.
+      store.loadMore();
+      expect(timelineSub.close).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(5000);
+      await flushMicrotasks();
+      expect(mockOutboxSubscribe).toHaveBeenCalledTimes(2);
+
+      timelineSub.emit('event', { event: makeEvent('late-nip65-history', 2001, 'a'.repeat(64)) });
+      expect(store.state.timeline[0]?.id).toBe('late-nip65-history');
+
+      timelineSub.emit('closed');
+      await flushMicrotasks();
+      expect(timelineSub.close).toHaveBeenCalledOnce();
+      expect(mockOutboxSubscribe).toHaveBeenCalledTimes(3);
 
       store.destroy();
     } finally {
@@ -1585,18 +1673,14 @@ describe('createFeedStore', () => {
 
   it('cancels stale following contact-list callbacks when an external payload arrives during startup', async () => {
     installShell(true);
-    const contactsQuery = deferredOutboxQuery();
-    mockOutboxQuery.mockImplementation((filters) => {
-      const first = Array.isArray(filters) ? filters[0] : filters;
-      if ((first as { kinds?: number[] })?.kinds?.includes(3)) {
-        return contactsQuery.promise;
-      }
-      return Promise.resolve({ events: [] });
-    });
-    mockOutboxSubscribe.mockReturnValue(makeOutboxSub() as unknown as ReturnType<typeof outbox.subscribe>);
+    const contactsSub = makeOutboxSub();
+    mockOutboxSubscribe
+      .mockReturnValueOnce(contactsSub as unknown as ReturnType<typeof outbox.subscribe>)
+      .mockReturnValue(makeOutboxSub() as unknown as ReturnType<typeof outbox.subscribe>);
 
     const store = createFeedStore();
     store.init('f'.repeat(64));
+    await flushMicrotasks();
     store.applyPayload({
       filters: [{ kinds: [1], authors: ['a'.repeat(64)] }],
       origin: 'outbox',
@@ -1604,27 +1688,25 @@ describe('createFeedStore', () => {
     });
     await flushMicrotasks();
 
-    contactsQuery.resolve({
-      events: [{ event: makeKind3Event('f'.repeat(64), ['b'.repeat(64)]) }],
-    });
-    await flushMicrotasks();
+    contactsSub.emit('event', { event: makeKind3Event('f'.repeat(64), ['b'.repeat(64)]) });
 
     expect(store.currentPayload).toEqual({
       filters: [{ kinds: [1], authors: ['a'.repeat(64)] }],
       origin: 'outbox',
       title: 'hzrd149',
     });
-    expect(mockOutboxQuery).toHaveBeenCalled();
+    expect(mockOutboxQuery).not.toHaveBeenCalled();
   });
 
-  it('ignores a late empty outbox author page after hard-timeout', async () => {
+  it('ignores a late event after the finite outbox page closes', async () => {
     vi.useFakeTimers();
     try {
       installShell(true);
+      const timelineSub = makeOutboxSub();
       const liveSub = makeOutboxSub();
-      const timelineQuery = deferredOutboxQuery();
-      mockOutboxQuery.mockImplementationOnce(() => timelineQuery.promise);
-      mockOutboxSubscribe.mockReturnValueOnce(liveSub as unknown as ReturnType<typeof outbox.subscribe>);
+      mockOutboxSubscribe
+        .mockReturnValueOnce(timelineSub as unknown as ReturnType<typeof outbox.subscribe>)
+        .mockReturnValueOnce(liveSub as unknown as ReturnType<typeof outbox.subscribe>);
 
       const store = createFeedStore();
       store.applyPayload({
@@ -1637,12 +1719,11 @@ describe('createFeedStore', () => {
       vi.advanceTimersByTime(5000);
       expect(store.state.loading).toBe(false);
 
-      vi.advanceTimersByTime(25_001);
-      timelineQuery.resolve({
-        events: [{ event: makeEvent('too-late-author-note', 1000, 'a'.repeat(64)) }],
-      });
-      await flushMicrotasks();
+      timelineSub.emit('closed');
+      timelineSub.emit('event', { event: makeEvent('too-late-author-note', 1000, 'a'.repeat(64)) });
       expect(store.state.timeline).toEqual([]);
+      expect(timelineSub.close).toHaveBeenCalledOnce();
+      expect(mockOutboxQuery).not.toHaveBeenCalled();
       store.destroy();
     } finally {
       vi.useRealTimers();

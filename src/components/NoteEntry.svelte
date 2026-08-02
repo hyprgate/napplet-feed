@@ -2,8 +2,8 @@
   import { format } from 'timeago.js';
   import * as nip19 from 'nostr-tools/nip19';
   import type { NostrEvent } from 'applesauce-core/helpers/event';
-  import { inc as ipc } from '@napplet/sdk';
   import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
+  import { createFeedProfileIntentRequest, invokeFeedIntent } from '../lib/feed-actions';
   import type { EngagementCounts } from '../lib/feed-store';
   import type { EmojiOption } from '../lib/emoji-sets';
   import type { ProfileContent } from '../lib/profile-metadata';
@@ -32,9 +32,10 @@
     }
   }
 
-  function openProfile() {
+  async function openProfile(): Promise<void> {
     if (!isCanonicalHexPubkey(event.pubkey)) return;
-    ipc.emit('profile:open', [], JSON.stringify({ pubkey: event.pubkey }));
+    const request = createFeedProfileIntentRequest(event.pubkey);
+    if (request) await invokeFeedIntent(request);
   }
 
   let authorName = $derived.by(() => {

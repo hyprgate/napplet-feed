@@ -7,11 +7,10 @@ export default defineConfig({
   plugins: [
     UnoCSS(),
     svelte(),
-    // @napplet/vite-plugin 0.9.0 emits the `['archetype', slug, ...naps]` tag at
-    // build time from this `archetypes` option, so the kind-35129 manifest is
-    // build-signed WITH the archetype tag. The resolution-sim harness serves it
-    // verbatim — no serve-time injection or re-sign. An object entry is required
-    // to carry the recommended nap, producing ['archetype','feed','feed'].
+    // The sealed public plugin emits the canonical
+    // ['archetype', slug, 'napplet:<archetype>/<intent>'] manifest tag at build
+    // time. The resolution-sim harness serves it verbatim — no serve-time
+    // injection or re-sign.
     nip5aManifest({
       nappletType: 'feed',
       // Phase 88 (FEED-02): the feed now routes its timeline through the
@@ -22,7 +21,7 @@ export default defineConfig({
       // was true shell-side but the router was never reached — missing capability.)
       requires: ['identity', 'relay', 'inc', 'outbox', 'storage', 'resource', 'theme'],
       artifactMode: 'single-file',
-      archetypes: [{ slug: 'feed', naps: ['feed'] }],
+      archetypes: [{ slug: 'feed', convention: 'napplet:feed/open' }],
     }),
   ],
   resolve: {

@@ -174,7 +174,7 @@
           loadingPubkeys.delete(pk);
         },
         () => {
-          // EOSE only marks the initial profile burst; the subscription remains
+          // This only marks the initial profile pass; the subscription remains
           // live so late relay/cache metadata can replace npub fallbacks.
         },
       );

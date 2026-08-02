@@ -1,4 +1,4 @@
-import { resourceBytesAsObjectURL, resourceBytesMany } from '@napplet/nap/resource';
+import { resourceBytes, resourceBytesMany } from '@napplet/nap/resource';
 import type { ResourceBytesErrorItem, ResourceBytesItem } from '@napplet/nap/resource';
 
 export interface ResourceObjectUrlSubscription {
@@ -22,7 +22,7 @@ export type ResourceObjectUrlsChange = (source: string, url: string | null) => v
 interface ResourceObjectUrlHandle {
   url: string;
   revoke(): void;
-  ready?: Promise<unknown>;
+  ready: Promise<unknown>;
 }
 
 type ResourceActionReturn<Parameter> = {
@@ -156,6 +156,31 @@ function createResolvedResourceObjectUrlHandle(blob: Blob): ResourceObjectUrlHan
   };
 }
 
+function createPendingResourceObjectUrlHandle(source: string): ResourceObjectUrlHandle {
+  let objectUrl: string | null = null;
+  let revoked = false;
+  const handle: ResourceObjectUrlHandle = {
+    url: '',
+    ready: Promise.resolve(),
+    revoke(): void {
+      if (revoked) return;
+      revoked = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = null;
+      handle.url = '';
+    },
+  };
+
+  handle.ready = resourceBytes(source).then((blob) => {
+    if (revoked) return;
+    objectUrl = URL.createObjectURL(blob);
+    handle.url = objectUrl;
+    return objectUrl;
+  });
+
+  return handle;
+}
+
 function cacheResourceObjectUrlHandle(source: string, handle: ResourceObjectUrlHandle): CachedResourceObjectUrlEntry {
   const existing = resourceObjectUrlCache.get(source);
   if (existing) deleteCachedResourceObjectUrlEntry(existing);
@@ -185,7 +210,7 @@ function getCachedResourceObjectUrlEntry(
 
   if (existing && options.refresh) deleteCachedResourceObjectUrlEntry(existing);
 
-  const handle = resourceBytesAsObjectURL(source) as ResourceObjectUrlHandle;
+  const handle = createPendingResourceObjectUrlHandle(source);
   const entry = cacheResourceObjectUrlHandle(source, handle);
 
   Promise.resolve(handle.ready)

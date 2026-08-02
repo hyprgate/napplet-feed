@@ -5,9 +5,8 @@
 // by `origin` and returning a uniform { close } handle (same shape as
 // relay.subscribe / profile-metadata's adapter):
 //
-//   origin:'outbox'  → NAP-OUTBOX discovery: outbox.query(filters) for page
-//                      legs, outbox.subscribe(filters) for live legs,
-//                      when supports('outbox'),
+//   origin:'outbox'  → NAP-OUTBOX discovery: outbox.subscribe(filters) when
+//                      supports('outbox'),
 //                      else NAP-RELAYS fallback via relay.subscribe.
 //
 //   origin:'relay'   → NAP-RELAYS exact relay fan-out: one relay.subscribe call
@@ -18,7 +17,13 @@
 // The supports('outbox') gate MUST be read AFTER await shell.ready() — it is
 // false until shell.init lands (Phase 87 canonical pattern, profile-metadata.ts).
 
-import { outbox, relay, type Subscription, type RelayEventResult } from '@napplet/sdk';
+import {
+  outbox,
+  relay,
+  type OutboxSubscribeOptions,
+  type RelayEventResult,
+  type Subscription,
+} from '@napplet/sdk';
 import type { FeedIntentPayload, NostrEvent, NostrFilter } from '@hyprgate/types';
 
 /** Minimal shape of the shim-installed shell handshake we depend on. */
@@ -34,15 +39,8 @@ function getShell(): NappletShellHandle | null {
 /** Callbacks for a payload subscription. */
 export interface PayloadSubscriptionCallbacks {
   onEvent(event: NostrEvent, relayHints?: string[]): void;
-  onEose(): void;
-}
-
-/**
- * The outbox options used by the origin:'outbox' path. Relay-origin feeds are
- * intentionally routed via NAP-RELAYS (`relay.subscribe`) below.
- */
-interface FeedOutboxSubscribeOptions {
-  live: boolean;
+  onEose(reason?: string): void;
+  onRoute?(route: 'outbox' | 'relay'): void;
 }
 
 /**
@@ -77,6 +75,8 @@ function withExtraProps(
  * @param extraFilterProps - Per-leg filter props merged into every filter (the
  *   feed-engine passes `{ limit, until }` for the paged leg and `{ since }` for
  *   the live leg, preserving its pagination/live split).
+ * @param outboxOptions - Shell-owned outbox lifecycle options. These stay out
+ *   of Nostr filters, which keeps pagination filters protocol-shaped.
  * @returns A synchronous { close } handle; the subscription opens after the
  *   shell.ready() gate resolves, and an early close() is honored.
  */
@@ -84,6 +84,7 @@ export function subscribeForPayload(
   payload: FeedIntentPayload,
   callbacks: PayloadSubscriptionCallbacks,
   extraFilterProps?: Record<string, unknown>,
+  outboxOptions?: OutboxSubscribeOptions,
 ): Subscription {
   const filters = withExtraProps(payload.filters, extraFilterProps);
 
@@ -103,27 +104,24 @@ export function subscribeForPayload(
     }
   }
 
-  function openOutbox(options: FeedOutboxSubscribeOptions): Subscription {
-    if (!options.live) {
-      let queryClosed = false;
-      void outbox.query(filters)
-        .then((result) => {
-          if (queryClosed) return;
-          for (const item of result.events) {
-            callbacks.onEvent(item.event as NostrEvent, item.sidecar?.relayHints);
-          }
-        })
-        .finally(() => {
-          if (!queryClosed) callbacks.onEose();
-        });
-      return { close: () => { queryClosed = true; } };
-    }
+  function openOutbox(): Subscription {
+    const sub = outboxOptions === undefined
+      ? outbox.subscribe(filters)
+      : outbox.subscribe(filters, outboxOptions);
+    let eoseSent = false;
+    let remoteClosed = false;
+    const sendEose = (reason?: string): void => {
+      if (closed || eoseSent) return;
+      eoseSent = true;
+      remoteClosed = true;
+      callbacks.onEose(reason);
+    };
 
-    const sub = outbox.subscribe(filters);
-    sub.on('event', (result: RelayEventResult) => callbacks.onEvent(
-      result.event as NostrEvent,
-      result.sidecar?.relayHints,
-    ));
+    sub.on('event', (result: RelayEventResult) => {
+      if (closed || remoteClosed) return;
+      callbacks.onEvent(result.event as NostrEvent, result.sidecar?.relayHints);
+    });
+    sub.on('closed', sendEose);
     return { close: () => sub.close() };
   }
 
@@ -181,15 +179,17 @@ export function subscribeForPayload(
     await shell?.ready();
     if (closed) return;
     const useOutbox = shell?.supports('outbox') ?? false;
-    const isLiveLeg = typeof extraFilterProps?.since === 'number';
 
     if (payload.origin === 'relay') {
+      callbacks.onRoute?.('relay');
       subscription = openPinnedRelays(payload.relays ?? []);
     } else if (useOutbox) {
       // Outbox discovery (NIP-65 author-write relays).
-      subscription = openOutbox({ live: isLiveLeg });
+      callbacks.onRoute?.('outbox');
+      subscription = openOutbox();
     } else {
       // NAP-RELAYS fallback: the runtime selects relays from the filter set.
+      callbacks.onRoute?.('relay');
       subscription = openRelayFallback();
     }
 

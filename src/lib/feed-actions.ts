@@ -1,10 +1,18 @@
-import type { NostrEvent } from '@hyprgate/types';
 import {
-  NOTE_VIEWER_OPEN_TOPIC,
+  createIntentRequest,
+  parseIntentResult,
+  type IntentRequest,
+  type IntentRequestOptions,
+  type IntentResult,
+  type NostrEvent,
+} from '@hyprgate/types';
+import {
+  createNoteViewerOpenIntentRequest,
   createNoteViewerOpenPayload,
+  createProfileIntentRequest,
   type NoteViewerOpenPayload,
 } from '@hyprgate/utils';
-import { relay } from '@napplet/sdk';
+import { intent, relay } from '@napplet/sdk';
 import * as nip19 from 'nostr-tools/nip19';
 import { normalizeRelayHints, relayHintsForEvent } from './event-relay-hints.js';
 
@@ -31,6 +39,10 @@ export interface FeedComposeOpenPayload {
   };
 }
 
+export type FeedIntentDispatchResult =
+  | { handled: true; result: IntentResult }
+  | { handled: false; error: string };
+
 export function createFeedNoteOpenPayload(
   event: NostrEvent,
   relayHints: readonly string[] = relayHintsForEvent(event),
@@ -47,6 +59,62 @@ export function createFeedNoteOpenPayload(
     behavior: { focus: true },
     source: { napplet: 'feed' },
   });
+}
+
+/** Build a public note request while retaining Feed's existing focus policy. */
+export function createFeedNoteIntentRequest(
+  event: NostrEvent,
+  options: IntentRequestOptions = {},
+): IntentRequest | null {
+  const payload = createFeedNoteOpenPayload(event);
+  return payload ? createFeedNoteIntentRequestFromPayload(payload, options) : null;
+}
+
+/** Build a public note request from an already-validated Feed note payload. */
+export function createFeedNoteIntentRequestFromPayload(
+  payload: NoteViewerOpenPayload,
+  options: IntentRequestOptions = {},
+): IntentRequest | null {
+  const behavior = payload.behavior || options.behavior
+    ? { ...payload.behavior, ...options.behavior }
+    : undefined;
+  return createNoteViewerOpenIntentRequest(payload, {
+    ...options,
+    ...(behavior ? { behavior } : {}),
+  });
+}
+
+/** Build a public profile request from a Feed identity target. */
+export function createFeedProfileIntentRequest(
+  pubkey: string,
+  options: IntentRequestOptions = {},
+): IntentRequest | null {
+  return createProfileIntentRequest({ pubkey }, options);
+}
+
+/** Build a public composer request without a legacy routing topic. */
+export function createFeedComposerIntentRequest(
+  payload: FeedComposeOpenPayload | { source: { napplet: 'feed' } },
+  options: IntentRequestOptions = {},
+): IntentRequest | null {
+  return createIntentRequest({ archetype: 'composer', ...options, payload });
+}
+
+/** Invoke a request only when the public result preserves request identity and is handled. */
+export async function invokeFeedIntent(request: IntentRequest): Promise<FeedIntentDispatchResult> {
+  try {
+    const result = parseIntentResult(await intent.invoke(request));
+    const action = request.action ?? 'open';
+    if (!result || result.archetype !== request.archetype || result.action !== action) {
+      return { handled: false, error: 'The intent returned an invalid result.' };
+    }
+    if (!result.ok || !result.handled) {
+      return { handled: false, error: result.error ?? `No ${request.archetype} handler is available.` };
+    }
+    return { handled: true, result };
+  } catch (error) {
+    return { handled: false, error: error instanceof Error ? error.message : 'The intent could not be dispatched.' };
+  }
 }
 
 export function createFeedReferenceOpenPayload(source: string): NoteViewerOpenPayload | null {
@@ -162,5 +230,3 @@ export function createFeedReplyComposePayload(
     },
   };
 }
-
-export { NOTE_VIEWER_OPEN_TOPIC };

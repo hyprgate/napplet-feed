@@ -1,10 +1,15 @@
 <script lang="ts">
   // Thin adapter over the shared @hyprgate/napplet-ui note renderer — supplies feed's
-  // navigation wiring (open a profile via inter-pane message).
-  import { inc as ipc, link } from '@napplet/sdk';
+  // navigation wiring (open canonical shell intent requests).
+  import { link } from '@napplet/sdk';
   import { isCanonicalHexPubkey } from '@hyprgate/utils';
   import NoteContent from '@hyprgate/napplet-ui/NoteContent.svelte';
-  import { createFeedReferenceOpenPayload, NOTE_VIEWER_OPEN_TOPIC } from '../lib/feed-actions';
+  import {
+    createFeedNoteIntentRequestFromPayload,
+    createFeedProfileIntentRequest,
+    createFeedReferenceOpenPayload,
+    invokeFeedIntent,
+  } from '../lib/feed-actions';
 
   interface Props {
     content: string;
@@ -16,9 +21,10 @@
   let { content, emojiTags = [], profileLabel, loadResources = true }: Props = $props();
   const FEED_RESOURCE_BATCH_SIZE = 10;
 
-  function openProfile(pubkey: string): void {
+  async function openProfile(pubkey: string): Promise<void> {
     if (!isCanonicalHexPubkey(pubkey)) return;
-    ipc.emit('profile:open', [], JSON.stringify({ pubkey }));
+    const request = createFeedProfileIntentRequest(pubkey);
+    if (request) await invokeFeedIntent(request);
   }
 
   // NAP-LINK: route external links through the shell-owned opener so the new
@@ -28,10 +34,10 @@
     return result.status === 'opened';
   }
 
-  function openReference(source: string): void {
+  async function openReference(source: string): Promise<void> {
     const payload = createFeedReferenceOpenPayload(source);
-    if (!payload) return;
-    ipc.emit(NOTE_VIEWER_OPEN_TOPIC, [], JSON.stringify(payload));
+    const request = payload ? createFeedNoteIntentRequestFromPayload(payload) : null;
+    if (request) await invokeFeedIntent(request);
   }
 </script>
 

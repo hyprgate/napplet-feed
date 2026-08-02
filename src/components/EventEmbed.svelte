@@ -3,9 +3,10 @@
   import type { NostrEvent } from '@hyprgate/types';
   import { KIND_REPOST } from '@hyprgate/types';
   import type { Subscription } from '@napplet/sdk';
-  import { inc as ipc, relay } from '@napplet/sdk';
-  import { NOTE_VIEWER_OPEN_TOPIC, createNoteViewerOpenPayload, pubkeyColorStyle } from '@hyprgate/utils';
+  import { relay } from '@napplet/sdk';
+  import { createNoteViewerOpenPayload, pubkeyColorStyle } from '@hyprgate/utils';
   import { isFeedRenderableEvent, isInlineDepthExhausted, MAX_INLINE_EVENT_DEPTH } from '../lib/rendering-fallbacks';
+  import { createFeedNoteIntentRequestFromPayload, invokeFeedIntent } from '../lib/feed-actions';
   import ExpandableNoteContent from './ExpandableNoteContent.svelte';
   import FeedEmbeds from './FeedEmbeds.svelte';
   import RepostContent from './RepostContent.svelte';
@@ -39,14 +40,14 @@
   let status = $derived(providedEvent ? 'ready' : fetchStatus);
   let canRenderNestedEvents = $derived(!isInlineDepthExhausted(depth, maxDepth));
 
-  function openNote(): void {
+  async function openNote(): Promise<void> {
     const payload = createNoteViewerOpenPayload({
       target: { type: 'event', id, ...(event ? { kind: event.kind, pubkey: event.pubkey } : {}) },
       behavior: { focus: true },
       source: { napplet: 'feed' },
     });
-    if (!payload) return;
-    ipc.emit(NOTE_VIEWER_OPEN_TOPIC, [], JSON.stringify(payload));
+    const request = payload ? createFeedNoteIntentRequestFromPayload(payload) : null;
+    if (request) await invokeFeedIntent(request);
   }
 
   onMount(() => {

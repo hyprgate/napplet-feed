@@ -5,6 +5,7 @@ import FeedCards from './FeedCards.svelte';
 import FeedList from './FeedList.svelte';
 import FeedTerminal from './FeedTerminal.svelte';
 import type { FeedLoadIntent } from '../lib/feed-store';
+import { feedPayloadFromIncEvent, type IncEvent } from '../feed-intent-delivery';
 
 vi.mock('@napplet/sdk', () => ({
   inc: {
@@ -146,5 +147,19 @@ describe('feed proactive load intents', () => {
     expect(onLoadMore).toHaveBeenLastCalledWith('urgent');
 
     unmount(mounted);
+  });
+});
+
+describe('feed canonical INC delivery adapter', () => {
+  const payload = { filters: [{ kinds: [1] }], origin: 'outbox' };
+
+  it.each(['warm direct', 'cold persisted state followed by a warm update'])('accepts a valid %s IncEvent payload', (delivery) => {
+    expect(delivery).toBeTruthy();
+    expect(feedPayloadFromIncEvent({ topic: 'feed:open', sender: 'hyprgate-shell', payload } as IncEvent)).toEqual(payload);
+  });
+
+  it('rejects absent and malformed IncEvent payloads', () => {
+    expect(feedPayloadFromIncEvent({ topic: 'feed:open', sender: 'hyprgate-shell' } as IncEvent)).toBeNull();
+    expect(feedPayloadFromIncEvent({ topic: 'feed:open', sender: 'hyprgate-shell', payload: { origin: 'outbox' } } as IncEvent)).toBeNull();
   });
 });

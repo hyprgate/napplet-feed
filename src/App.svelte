@@ -8,10 +8,10 @@
     IDENTITY_CHANGED_TOPIC,
     LEGACY_AUTH_IDENTITY_CHANGED_TOPIC,
     parseIdentityChangedPayload,
-    validateFeedIntentPayload,
     waitForPublicKey,
   } from '@hyprgate/utils';
   import { getInstancePayload, setInstancePayload } from './lib/feed-storage';
+  import { feedPayloadFromIncEvent } from './feed-intent-delivery.js';
   import FeedContainer from './components/FeedContainer.svelte';
 
   // ── App state ──────────────────────────────────────────────────────────────
@@ -33,8 +33,8 @@
   onMount(() => {
     const controller = new AbortController();
 
-    const handleIdentityChanged = (raw: unknown) => {
-      const identityChange = parseIdentityChangedPayload(raw);
+    const handleIdentityChanged = (event) => {
+      const identityChange = parseIdentityChangedPayload(event.payload);
       if (identityChange) pubkey = identityChange.pubkey;
     };
     const canonicalSub = ipc.on(IDENTITY_CHANGED_TOPIC, handleIdentityChanged);
@@ -44,8 +44,8 @@
     // payload crosses the napplet trust boundary, so it is UNTRUSTED: validate
     // before applying (T-88-09); invalid payloads are dropped. A valid payload
     // is applied to the render path and persisted per-window so reload restores it.
-    const applyPayload = (raw: unknown): void => {
-      const valid = validateFeedIntentPayload(raw);
+    const applyPayload = (event): void => {
+      const valid = feedPayloadFromIncEvent(event);
       if (!valid) return;
       payload = valid;
       payloadStartupResolved = true;

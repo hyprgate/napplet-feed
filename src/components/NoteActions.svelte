@@ -1,11 +1,11 @@
 <script lang="ts">
   import type { NostrEvent } from '@hyprgate/types';
   import { resourceImageBatch as resourceImage } from '@hyprgate/utils';
-  import { inc as ipc } from '@napplet/sdk';
   import {
-    NOTE_VIEWER_OPEN_TOPIC,
-    createFeedNoteOpenPayload,
+    createFeedComposerIntentRequest,
+    createFeedNoteIntentRequest,
     createFeedReplyComposePayload,
+    invokeFeedIntent,
     publishReaction,
   } from '../lib/feed-actions';
   import {
@@ -27,14 +27,20 @@
   let customReaction = $state('');
   let error = $state<string | null>(null);
 
-  function openReplyComposer(): void {
-    ipc.emit('compose:open', [], JSON.stringify(createFeedReplyComposePayload(event)));
+  async function openReplyComposer(): Promise<void> {
+    error = null;
+    const request = createFeedComposerIntentRequest(createFeedReplyComposePayload(event));
+    if (!request) return;
+    const result = await invokeFeedIntent(request);
+    if (!result.handled) error = result.error;
   }
 
-  function openNoteViewer(): void {
-    const payload = createFeedNoteOpenPayload(event);
-    if (!payload) return;
-    ipc.emit(NOTE_VIEWER_OPEN_TOPIC, [], JSON.stringify(payload));
+  async function openNoteViewer(): Promise<void> {
+    error = null;
+    const request = createFeedNoteIntentRequest(event);
+    if (!request) return;
+    const result = await invokeFeedIntent(request);
+    if (!result.handled) error = result.error;
   }
 
   async function react(input: string | ReturnType<typeof reactionInputFromEmojiOption>): Promise<void> {

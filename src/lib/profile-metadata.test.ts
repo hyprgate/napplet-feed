@@ -74,54 +74,65 @@ describe('subscribeProfileMetadata', () => {
     delete (globalThis as unknown as { napplet?: unknown }).napplet;
   });
 
-  it('uses outbox.query with the kind-0 author filter (NAP-OUTBOX profile discovery)', async () => {
-    installShell();
-    const event = makeProfileEvent('pk1', 100, {
-      name: 'alice',
-      display_name: 'Alice',
-      picture: 'https://example.com/alice.png',
-    });
-    vi.mocked(outbox.query).mockImplementation(async (filters, options) => {
-      expect(filters).toEqual([{ kinds: [0], authors: ['pk1'], limit: 1 }]);
-      expect(options).toBeUndefined();
-      return { events: [{ event }] };
-    });
-    const received: Array<[string, unknown]> = [];
-    const done = vi.fn();
+  it('keeps kind-0 discovery live through outbox.subscribe after the initial UI pass', async () => {
+    vi.useFakeTimers();
+    try {
+      installShell();
+      const sub = makeOutboxSub();
+      vi.mocked(outbox.subscribe).mockReturnValue(sub as unknown as ReturnType<typeof outbox.subscribe>);
+      const event = makeProfileEvent('pk1', 100, {
+        name: 'alice',
+        display_name: 'Alice',
+        picture: 'https://example.com/alice.png',
+      });
+      const received: Array<[string, unknown]> = [];
+      const done = vi.fn();
 
-    const handle = subscribeProfileMetadata(['pk1'], (pubkey, profile) => received.push([pubkey, profile]), done);
-    await flush();
+      const handle = subscribeProfileMetadata(['pk1'], (pubkey, profile) => received.push([pubkey, profile]), done);
+      await Promise.resolve();
+      await Promise.resolve();
 
-    expect(relay.subscribe).not.toHaveBeenCalled();
-    expect(done).toHaveBeenCalledOnce();
+      expect(relay.subscribe).not.toHaveBeenCalled();
+      expect(outbox.subscribe).toHaveBeenCalledWith([{ kinds: [0], authors: ['pk1'], limit: 1 }]);
+      expect(outbox.query).not.toHaveBeenCalled();
+      expect(done).not.toHaveBeenCalled();
+      expect(received).toEqual([]);
 
-    expect(received).toEqual([['pk1', {
-      name: 'alice',
-      display_name: 'Alice',
-      picture: 'https://example.com/alice.png',
-    }]]);
+      vi.advanceTimersByTime(5000);
+      expect(done).toHaveBeenCalledOnce();
 
-    handle.close();
-    expect(outbox.subscribe).not.toHaveBeenCalled();
+      sub.emit('event', { event });
+      expect(received).toEqual([['pk1', {
+        name: 'alice',
+        display_name: 'Alice',
+        picture: 'https://example.com/alice.png',
+      }]]);
+
+      sub.emit('closed');
+      expect(done).toHaveBeenCalledOnce();
+
+      handle.close();
+      expect(sub.close).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the newest metadata event per pubkey and ignores malformed content', async () => {
     installShell();
-    vi.mocked(outbox.query).mockImplementation(async () => {
-      return {
-        events: [
-          { event: makeProfileEvent('pk1', 200, { name: 'new' }) },
-          { event: makeProfileEvent('pk1', 100, { name: 'old' }) },
-          { event: makeProfileEvent('pk1', 300, '{malformed') },
-        ],
-      };
-    });
+    const sub = makeOutboxSub();
+    vi.mocked(outbox.subscribe).mockReturnValue(sub as unknown as ReturnType<typeof outbox.subscribe>);
     const received: Array<[string, string | undefined]> = [];
 
-    subscribeProfileMetadata(['pk1'], (pubkey, profile) => received.push([pubkey, profile.name]));
+    const handle = subscribeProfileMetadata(['pk1'], (pubkey, profile) => received.push([pubkey, profile.name]));
     await flush();
 
+    sub.emit('event', { event: makeProfileEvent('pk1', 200, { name: 'new' }) });
+    sub.emit('event', { event: makeProfileEvent('pk1', 100, { name: 'old' }) });
+    sub.emit('event', { event: makeProfileEvent('pk1', 300, '{malformed') });
+
     expect(received).toEqual([['pk1', 'new']]);
+    handle.close();
   });
 
   it('falls back to relay.subscribe only when the shell does not support outbox', async () => {
@@ -138,6 +149,7 @@ describe('subscribeProfileMetadata', () => {
     subscribeProfileMetadata(['pk1'], (pubkey, profile) => received.push([pubkey, profile.name]));
     await flush();
 
+    expect(outbox.subscribe).not.toHaveBeenCalled();
     expect(outbox.query).not.toHaveBeenCalled();
     onEvent?.({ event: makeProfileEvent('pk1', 100, { name: 'fallback' }) });
     expect(received).toEqual([['pk1', 'fallback']]);
@@ -152,7 +164,8 @@ describe('subscribeProfileMetadata', () => {
     handle.close(); // before await ready() resolves
     await flush();
 
-    // Closed before the gate resolved: no relay connection is ever opened.
+    // Closed before the gate resolved: no connection is ever opened.
+    expect(outbox.subscribe).not.toHaveBeenCalled();
     expect(outbox.query).not.toHaveBeenCalled();
     expect(relay.subscribe).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
@@ -167,17 +180,19 @@ describe('subscribeProfileMetadata', () => {
 
   it('uses one limit-1 filter per author so one profile cannot starve the rest', async () => {
     installShell();
-    vi.mocked(outbox.query).mockImplementation(async (filters) => {
+    vi.mocked(outbox.subscribe).mockImplementation((filters) => {
       expect(filters).toEqual([
         { kinds: [0], authors: ['pk1'], limit: 1 },
         { kinds: [0], authors: ['pk2'], limit: 1 },
       ]);
-      return { events: [] };
+      return makeOutboxSub() as unknown as ReturnType<typeof outbox.subscribe>;
     });
 
-    subscribeProfileMetadata(['pk1', 'pk2'], () => { /* no-op */ });
+    const handle = subscribeProfileMetadata(['pk1', 'pk2'], () => { /* no-op */ });
     await flush();
 
-    expect(outbox.query).toHaveBeenCalledOnce();
+    expect(outbox.subscribe).toHaveBeenCalledOnce();
+    expect(outbox.query).not.toHaveBeenCalled();
+    handle.close();
   });
 });

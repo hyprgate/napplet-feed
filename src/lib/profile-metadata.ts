@@ -1,10 +1,7 @@
 import { outbox, relay, type Subscription } from '@napplet/sdk';
 import type { NostrEvent } from '@hyprgate/types';
 
-/**
- * Shared kind-0 profile-metadata subscription (feed / live-chat / movie — keep the
- * three byte-identical, anti-drift).
- */
+/** Feed-local kind-0 metadata stream used by timeline rows and embeds. */
 interface NappletShellHandle {
   ready(): Promise<unknown>;
   supports(domain: string, protocol?: string): boolean;
@@ -25,6 +22,7 @@ export interface ProfileContent {
 export type ProfileMetadataCallback = (pubkey: string, profile: ProfileContent) => void;
 
 const NOOP_SUBSCRIPTION: Subscription = { close: () => { /* no-op */ } };
+const OUTBOX_PROFILE_INITIAL_SETTLE_MS = 5_000;
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
@@ -62,12 +60,21 @@ export function subscribeProfileMetadata(
   let subscription: Subscription | null = null;
   let closed = false;
   let closeWhenReady = false;
+  let initialPassComplete = false;
+  let initialPassTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function clearInitialPassTimeout(): void {
+    if (initialPassTimeout === null) return;
+    clearTimeout(initialPassTimeout);
+    initialPassTimeout = null;
+  }
 
   // Set up the close guard synchronously so an early close() (before the
   // shell.ready() gate resolves) is honored once the subscription opens.
   function close(): void {
     if (closed) return;
     closed = true;
+    clearInitialPassTimeout();
     if (subscription) {
       subscription.close();
     } else {
@@ -88,6 +95,9 @@ export function subscribeProfileMetadata(
   }
 
   function handleEose(): void {
+    clearInitialPassTimeout();
+    if (closed || initialPassComplete) return;
+    initialPassComplete = true;
     onDone();
   }
 
@@ -100,13 +110,14 @@ export function subscribeProfileMetadata(
     await shell?.ready();
     if (closed) return;
     if (shell?.supports('outbox') ?? false) {
-      subscription = NOOP_SUBSCRIPTION;
-      try {
-        const result = await outbox.query(filters);
-        for (const item of result.events) handleEvent(item.event as NostrEvent);
-      } finally {
-        if (!closed) handleEose();
-      }
+      const sub = outbox.subscribe(filters);
+      sub.on('event', (result) => handleEvent(result.event as NostrEvent));
+      sub.on('closed', handleEose);
+      subscription = sub;
+      // NAP-OUTBOX streams do not expose relay EOSE. Keep the stream live for
+      // late NIP-65/cache metadata, but bound the empty-state decision so an
+      // embed does not claim a missing profile before discovery has a chance.
+      initialPassTimeout = setTimeout(handleEose, OUTBOX_PROFILE_INITIAL_SETTLE_MS);
     } else {
       subscription = relay.subscribe(filters, (result) => handleEvent(result.event as NostrEvent), handleEose);
     }

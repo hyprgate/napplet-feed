@@ -3,8 +3,8 @@
   import type { NostrEvent } from 'applesauce-core/helpers/event';
   import { format } from 'timeago.js';
   import * as nip19 from 'nostr-tools/nip19';
-  import { inc as ipc } from '@napplet/sdk';
   import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
+  import { createFeedProfileIntentRequest, invokeFeedIntent } from '../lib/feed-actions';
   import type { EngagementCounts } from '../lib/feed-store';
   import {
     FEED_LOAD_THRESHOLDS,
@@ -51,9 +51,10 @@
     }
   }
 
-  function openProfile(pubkey: string) {
+  async function openProfile(pubkey: string): Promise<void> {
     if (!isCanonicalHexPubkey(pubkey)) return;
-    ipc.emit('profile:open', [], JSON.stringify({ pubkey }));
+    const request = createFeedProfileIntentRequest(pubkey);
+    if (request) await invokeFeedIntent(request);
   }
 
   function getAuthorName(pubkey: string, profile?: ProfileContent): string {

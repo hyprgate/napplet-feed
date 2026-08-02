@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { inc } from '@napplet/sdk';
+  import { createFeedComposerIntentRequest, invokeFeedIntent } from '../lib/feed-actions';
 
-  function openComposer(): void {
-    inc.emit('compose:open', [], JSON.stringify({ source: { napplet: 'feed' } }));
+  async function openComposer(): Promise<void> {
+    const request = createFeedComposerIntentRequest({ source: { napplet: 'feed' } });
+    if (request) await invokeFeedIntent(request);
   }
 </script>
 

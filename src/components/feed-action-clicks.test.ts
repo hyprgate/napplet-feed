@@ -1,18 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 import type { NostrEvent } from '@hyprgate/types';
-import { inc, relay } from '@napplet/sdk';
+import { inc, intent, relay } from '@napplet/sdk';
 import * as nip19 from 'nostr-tools/nip19';
 import FeedProfileHydrationHarness from './__fixtures__/FeedProfileHydrationHarness.svelte';
 import EventEmbed from './EventEmbed.svelte';
+import ProfileEmbed from './ProfileEmbed.svelte';
+import ReplyContextLink from './ReplyContextLink.svelte';
 import FeedNoteContent from './NoteContent.svelte';
 import NoteActions from './NoteActions.svelte';
 import NoteEntry from './NoteEntry.svelte';
-import { NOTE_VIEWER_OPEN_TOPIC } from '../lib/feed-actions';
 
 vi.mock('@napplet/sdk', () => ({
   inc: {
     emit: vi.fn(),
+  },
+  intent: {
+    invoke: vi.fn(async (request: { archetype: string; action?: string }) => ({
+      ok: true,
+      archetype: request.archetype,
+      action: request.action ?? 'open',
+      handled: true,
+      handler: request.archetype,
+      windowId: `${request.archetype}-window`,
+    })),
   },
   relay: {
     publish: vi.fn().mockResolvedValue({ id: 'reaction' }),
@@ -39,12 +50,6 @@ const EMBEDDED_REPOST_TARGET: NostrEvent = {
   content: "Who knows what it's good for.\n\nhttps://dergigi.com/2026/06/21/sayings/",
   sig: '3fe31509f8b16562356ccae8fbb9f4fafc52a5448b6a3b24c9abebde0c9790d4f33f7e869b8a02e21cba5b4f6a8517a9935fc0efe22e2bad3fcaf22ff52535ec',
 };
-
-function parseEmitPayload(callIndex: number): unknown {
-  const payload = vi.mocked(inc.emit).mock.calls[callIndex]?.[2];
-  expect(typeof payload).toBe('string');
-  return JSON.parse(payload as string);
-}
 
 describe('feed action click wiring', () => {
   beforeEach(() => {
@@ -138,6 +143,86 @@ describe('feed action click wiring', () => {
     expect(document.body.textContent).toContain('cannot render note');
   });
 
+  it('routes embedded note and profile clicks through canonical intent requests', async () => {
+    mount(EventEmbed, {
+      target: document.body,
+      props: { id: EVENT.id, event: EVENT },
+    });
+    mount(ProfileEmbed, {
+      target: document.body,
+      props: { pubkey: EVENT.pubkey },
+    });
+    await tick();
+
+    document.querySelector<HTMLButtonElement>('.embed-header')?.click();
+    await tick();
+    expect(intent.invoke).toHaveBeenCalledWith({
+      archetype: 'note',
+      behavior: { focus: true },
+      payload: {
+        target: { type: 'event', id: EVENT.id, kind: EVENT.kind, pubkey: EVENT.pubkey },
+        behavior: { focus: true },
+        source: { napplet: 'feed' },
+      },
+    });
+    expect(intent.invoke).toHaveBeenCalledTimes(1);
+
+    document.querySelector<HTMLButtonElement>('[data-profile-embed]')?.click();
+    await tick();
+    expect(intent.invoke).toHaveBeenLastCalledWith({
+      archetype: 'profile',
+      payload: { pubkey: EVENT.pubkey },
+    });
+    expect(inc.emit).not.toHaveBeenCalled();
+  });
+
+  it('routes reply-context and card author clicks through canonical intent requests', async () => {
+    const replyId = 'c'.repeat(64);
+    mount(ReplyContextLink, {
+      target: document.body,
+      props: {
+        reference: {
+          label: 'reply target',
+          title: 'reply target',
+          reference: { type: 'event', id: replyId },
+          target: { type: 'event', id: replyId },
+          relays: [],
+        },
+      },
+    });
+    const component = mount(FeedProfileHydrationHarness, {
+      target: document.body,
+    }) as {
+      setView(view: 'compact' | 'cards' | 'terminal'): void;
+      setEvents(events: NostrEvent[]): void;
+    };
+    component.setView('cards');
+    component.setEvents([EVENT]);
+    await tick();
+
+    document.querySelector<HTMLButtonElement>('.reply-context-link')?.click();
+    await tick();
+    expect(intent.invoke).toHaveBeenCalledWith({
+      archetype: 'note',
+      behavior: { focus: true },
+      payload: {
+        target: { type: 'event', id: replyId },
+        relays: [],
+        behavior: { focus: true },
+        source: { napplet: 'feed' },
+      },
+    });
+
+    document.querySelector<HTMLButtonElement>('[data-feed-author-pubkey]')?.click();
+    await tick();
+    expect(intent.invoke).toHaveBeenLastCalledWith({
+      archetype: 'profile',
+      payload: { pubkey: EVENT.pubkey },
+    });
+    expect(inc.emit).not.toHaveBeenCalled();
+    unmount(component);
+  });
+
   it('renders deduped NIP-89 handler buttons for unsupported events', async () => {
     const handler: NostrEvent = {
       id: '9'.repeat(64),
@@ -177,45 +262,62 @@ describe('feed action click wiring', () => {
     expect(links[0]?.getAttribute('href')).toMatch(/^https:\/\/example\.test\/open\/nevent1/);
   });
 
-  it('clicking Open and Reply emits note-viewer and compose NAP topics', () => {
+  it('clicking Open and Reply invokes canonical note and composer requests', async () => {
     mount(NoteActions, {
       target: document.body,
       props: { event: EVENT, reactionOptions: [] },
     });
 
     document.querySelectorAll('button')[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(inc.emit).toHaveBeenCalledWith(
-      NOTE_VIEWER_OPEN_TOPIC,
-      [],
-      expect.any(String),
-    );
-    expect(parseEmitPayload(0)).toEqual({
-      target: {
-        type: 'event',
-        id: EVENT.id,
-        kind: EVENT.kind,
-        pubkey: EVENT.pubkey,
-      },
+    await tick();
+    expect(intent.invoke).toHaveBeenCalledWith({
+      archetype: 'note',
       behavior: { focus: true },
-      source: { napplet: 'feed' },
+      payload: {
+        target: { type: 'event', id: EVENT.id, kind: EVENT.kind, pubkey: EVENT.pubkey },
+        behavior: { focus: true },
+        source: { napplet: 'feed' },
+      },
     });
 
     document.querySelectorAll('button')[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(inc.emit).toHaveBeenLastCalledWith('compose:open', [], expect.any(String));
-    expect(parseEmitPayload(1)).toEqual({
-      source: { napplet: 'feed' },
-      intent: 'reply',
-      replyTo: {
-        id: EVENT.id,
-        pubkey: EVENT.pubkey,
-        kind: EVENT.kind,
-        content: EVENT.content,
-        created_at: EVENT.created_at,
+    await tick();
+    expect(intent.invoke).toHaveBeenLastCalledWith({
+      archetype: 'composer',
+      payload: {
+        source: { napplet: 'feed' },
+        intent: 'reply',
+        replyTo: {
+          id: EVENT.id,
+          pubkey: EVENT.pubkey,
+          kind: EVENT.kind,
+          content: EVENT.content,
+          created_at: EVENT.created_at,
+        },
       },
     });
   });
 
-  it('clicking a feed author name emits the profile open NAP topic', () => {
+  it('shows a dispatch failure when the canonical note request is unhandled', async () => {
+    vi.mocked(intent.invoke).mockResolvedValueOnce({
+      ok: false,
+      archetype: 'note',
+      action: 'open',
+      handled: false,
+      error: 'No note handler is available',
+    });
+    mount(NoteActions, {
+      target: document.body,
+      props: { event: EVENT, reactionOptions: [] },
+    });
+
+    document.querySelectorAll('button')[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => {
+      expect(document.querySelector('[role="status"]')?.textContent).toBe('No note handler is available');
+    });
+  });
+
+  it('clicking a feed author name invokes a canonical profile request', async () => {
     mount(NoteEntry, {
       target: document.body,
       props: {
@@ -230,15 +332,12 @@ describe('feed action click wiring', () => {
       .find((button) => button.textContent?.trim() === 'Alice');
     expect(authorButton).toBeDefined();
     authorButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
 
-    expect(inc.emit).toHaveBeenCalledWith(
-      'profile:open',
-      [],
-      JSON.stringify({ pubkey: EVENT.pubkey }),
-    );
+    expect(intent.invoke).toHaveBeenCalledWith({ archetype: 'profile', payload: { pubkey: EVENT.pubkey } });
   });
 
-  it('clicking an inline note reference emits a note-viewer event target', async () => {
+  it('clicking an inline note reference invokes a canonical note target', async () => {
     const targetId = 'd'.repeat(64);
     const note = nip19.noteEncode(targetId);
     mount(FeedNoteContent, {
@@ -248,20 +347,20 @@ describe('feed action click wiring', () => {
     await tick();
 
     document.querySelector<HTMLButtonElement>('.note-content .ref')?.click();
+    await tick();
 
-    expect(inc.emit).toHaveBeenCalledWith(NOTE_VIEWER_OPEN_TOPIC, [], expect.any(String));
-    expect(parseEmitPayload(0)).toEqual({
-      target: {
-        type: 'event',
-        id: targetId,
-        nip19: note,
-      },
+    expect(intent.invoke).toHaveBeenCalledWith({
+      archetype: 'note',
       behavior: { focus: true },
-      source: { napplet: 'feed' },
+      payload: {
+        target: { type: 'event', id: targetId, nip19: note },
+        behavior: { focus: true },
+        source: { napplet: 'feed' },
+      },
     });
   });
 
-  it('clicking an inline address reference emits a note-viewer address target', async () => {
+  it('clicking an inline address reference invokes a canonical note target', async () => {
     const pubkey = 'c'.repeat(64);
     const naddr = nip19.naddrEncode({
       kind: 30023,
@@ -276,19 +375,17 @@ describe('feed action click wiring', () => {
     await tick();
 
     document.querySelector<HTMLButtonElement>('.note-content .ref')?.click();
+    await tick();
 
-    expect(inc.emit).toHaveBeenCalledWith(NOTE_VIEWER_OPEN_TOPIC, [], expect.any(String));
-    expect(parseEmitPayload(0)).toEqual({
-      target: {
-        type: 'address',
-        kind: 30023,
-        pubkey,
-        identifier: 'article',
-        nip19: naddr,
-      },
-      relays: ['wss://relay.example'],
+    expect(intent.invoke).toHaveBeenCalledWith({
+      archetype: 'note',
       behavior: { focus: true },
-      source: { napplet: 'feed' },
+      payload: {
+        target: { type: 'address', kind: 30023, pubkey, identifier: 'article', nip19: naddr },
+        relays: ['wss://relay.example'],
+        behavior: { focus: true },
+        source: { napplet: 'feed' },
+      },
     });
   });
 
@@ -366,11 +463,11 @@ describe('feed action click wiring', () => {
     document
       .querySelector<HTMLButtonElement>(`[data-profile-embed-pubkey="${npubMentionPubkey}"]`)
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(inc.emit).toHaveBeenCalledWith(
-      'profile:open',
-      [],
-      JSON.stringify({ pubkey: npubMentionPubkey }),
-    );
+    await tick();
+    expect(intent.invoke).toHaveBeenLastCalledWith({
+      archetype: 'profile',
+      payload: { pubkey: npubMentionPubkey },
+    });
 
     unmount(component);
   });

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { inc as ipc } from '@napplet/sdk';
   import { pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
   import * as nip19 from 'nostr-tools/nip19';
+  import { createFeedProfileIntentRequest, invokeFeedIntent } from '../lib/feed-actions';
   import { subscribeProfileMetadata, type ProfileContent } from '../lib/profile-metadata';
 
   interface Props {
@@ -17,8 +17,9 @@
   let status = $state<'loading' | 'ready' | 'empty' | 'error'>('loading');
   let resolvedProfile = $derived(cachedProfile ?? subscribedProfile);
 
-  function openProfile(): void {
-    ipc.emit('profile:open', [], JSON.stringify({ pubkey }));
+  async function openProfile(): Promise<void> {
+    const request = createFeedProfileIntentRequest(pubkey);
+    if (request) await invokeFeedIntent(request);
   }
 
   function shortNpub(): string {
