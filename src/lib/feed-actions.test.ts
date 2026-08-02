@@ -17,7 +17,7 @@ import {
   invokeFeedIntent,
 } from './feed-actions';
 import { rememberEventRelayHints } from './event-relay-hints';
-import { intent, relay } from '@napplet/sdk';
+import { intent, outbox, relay } from '@napplet/sdk';
 
 vi.mock('@napplet/sdk', () => ({
   intent: {
@@ -25,6 +25,14 @@ vi.mock('@napplet/sdk', () => ({
   },
   relay: {
     publish: vi.fn().mockResolvedValue({ id: 'reaction' }),
+  },
+  outbox: {
+    publish: vi.fn().mockResolvedValue({
+      ok: true,
+      event: { id: 'reaction' },
+      eventId: 'reaction',
+      relays: { 'wss://write.example': true },
+    }),
   },
 }));
 
@@ -193,9 +201,9 @@ describe('feed actions', () => {
     });
   });
 
-  it('publishes positive reactions through SDK relay', async () => {
-    await publishPositiveReaction(EVENT);
-    expect(vi.mocked(relay.publish)).toHaveBeenCalledWith(expect.objectContaining({
+  it('publishes positive reactions through the authored-event outbox and target inbox', async () => {
+    await expect(publishPositiveReaction(EVENT)).resolves.toMatchObject({ id: 'reaction' });
+    expect(vi.mocked(outbox.publish)).toHaveBeenCalledWith(expect.objectContaining({
       kind: 7,
       content: '+',
       tags: [
@@ -204,15 +212,25 @@ describe('feed actions', () => {
         ['k', String(EVENT.kind)],
         [...FEED_REACTION_CLIENT_TAG],
       ],
-    }));
+    }), { toInboxes: [EVENT.pubkey] });
+    expect(vi.mocked(relay.publish)).not.toHaveBeenCalled();
   });
 
-  it('publishes selected reactions through SDK relay', async () => {
+  it('publishes selected reactions through the authored-event outbox', async () => {
     await publishReaction(EVENT, '👀');
-    expect(vi.mocked(relay.publish)).toHaveBeenCalledWith(expect.objectContaining({
+    expect(vi.mocked(outbox.publish)).toHaveBeenCalledWith(expect.objectContaining({
       kind: 7,
       content: '👀',
-    }));
+    }), { toInboxes: [EVENT.pubkey] });
+  });
+
+  it('rejects a structured outbox publish failure', async () => {
+    vi.mocked(outbox.publish).mockResolvedValueOnce({
+      ok: false,
+      error: 'relay list unavailable',
+    });
+
+    await expect(publishReaction(EVENT, '+')).rejects.toThrow('relay list unavailable');
   });
 
   it('adds custom emoji tags to shortcode reactions', () => {

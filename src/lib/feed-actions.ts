@@ -12,7 +12,7 @@ import {
   createProfileIntentRequest,
   type NoteViewerOpenPayload,
 } from '@hyprgate/utils';
-import { intent, relay } from '@napplet/sdk';
+import { intent, outbox } from '@napplet/sdk';
 import * as nip19 from 'nostr-tools/nip19';
 import { normalizeRelayHints, relayHintsForEvent } from './event-relay-hints.js';
 
@@ -207,12 +207,22 @@ export function createReactionTemplate(event: Pick<NostrEvent, 'id' | 'kind' | '
   };
 }
 
-export async function publishPositiveReaction(event: Pick<NostrEvent, 'id' | 'kind' | 'pubkey'>): Promise<object> {
+export async function publishPositiveReaction(event: Pick<NostrEvent, 'id' | 'kind' | 'pubkey'>): Promise<NostrEvent> {
   return publishReaction(event, POSITIVE_REACTION);
 }
 
-export async function publishReaction(event: Pick<NostrEvent, 'id' | 'kind' | 'pubkey'>, reaction: string | ReactionInput): Promise<object> {
-  return relay.publish(createReactionTemplate(event, reaction));
+export async function publishReaction(
+  event: Pick<NostrEvent, 'id' | 'kind' | 'pubkey'>,
+  reaction: string | ReactionInput,
+): Promise<NostrEvent> {
+  const result = await outbox.publish(
+    createReactionTemplate(event, reaction),
+    { toInboxes: [event.pubkey] },
+  );
+  if (!result.ok || !result.event) {
+    throw new Error(result.error ?? 'Reaction publish failed');
+  }
+  return result.event;
 }
 
 export function createFeedReplyComposePayload(
