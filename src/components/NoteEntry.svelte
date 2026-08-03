@@ -70,14 +70,13 @@
   <!-- Avatar -->
   <button
     type="button"
-    class="flex-shrink-0 w-8 h-8 rounded-full overflow-hidden cursor-pointer bg-bg-surface border border-border-dim flex items-center justify-center"
+    class="relative flex-shrink-0 w-8 h-8 rounded-full overflow-hidden cursor-pointer bg-bg-surface border border-border-dim flex items-center justify-center"
     onclick={openProfile}
     aria-label="Open profile for {authorName}"
   >
+    <span class="text-text-muted text-xs font-mono">{avatarFallback}</span>
     {#if avatarUrl != null}
-      <img use:resourceImage={loadResources ? avatarUrl : null} alt={authorName} class="w-full h-full object-cover" loading="lazy" />
-    {:else}
-      <span class="text-text-muted text-xs font-mono">{avatarFallback}</span>
+      <img use:resourceImage={loadResources ? avatarUrl : null} alt="" class="absolute inset-0 w-full h-full object-cover" loading="lazy" />
     {/if}
   </button>
 

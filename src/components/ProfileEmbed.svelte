@@ -72,10 +72,9 @@
   data-profile-embed-label={displayName}
 >
   <span class="avatar">
+    <span>{fallback}</span>
     {#if resolvedProfile?.picture}
       <img use:resourceImage={loadResources ? resolvedProfile.picture : null} alt="" loading="lazy" />
-    {:else}
-      <span>{fallback}</span>
     {/if}
   </span>
   <span class="body">
@@ -108,9 +107,8 @@
     height: 28px;
     border-radius: 50%;
     overflow: hidden;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    display: inline-grid;
+    place-items: center;
     flex-shrink: 0;
     background: var(--hg-bg-base, #050505);
     color: var(--hg-text-muted, #b8b1a4);
@@ -121,6 +119,11 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  .avatar > span,
+  .avatar > img {
+    grid-area: 1 / 1;
   }
 
   .body {

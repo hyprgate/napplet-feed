@@ -163,16 +163,15 @@
       <div class="flex items-center gap-3 mb-2">
         <button
           type="button"
-          class="w-12 h-12 rounded-full overflow-hidden flex-shrink-0 bg-bg-base border border-border-dim flex items-center justify-center cursor-pointer"
+          class="relative w-12 h-12 rounded-full overflow-hidden flex-shrink-0 bg-bg-base border border-border-dim flex items-center justify-center cursor-pointer"
           onclick={() => openProfile(event.pubkey)}
           aria-label="Open profile"
         >
+          <span class="text-text-muted text-sm font-mono">
+            {(profile?.name ?? event.pubkey).slice(0, 2).toUpperCase()}
+          </span>
           {#if profile?.picture != null}
-            <img use:resourceImage={resourceEventIds.has(event.id) ? profile.picture : null} alt={getAuthorName(event.pubkey, profile)} class="w-full h-full object-cover" loading="lazy" />
-          {:else}
-            <span class="text-text-muted text-sm font-mono">
-              {(profile?.name ?? event.pubkey).slice(0, 2).toUpperCase()}
-            </span>
+            <img use:resourceImage={resourceEventIds.has(event.id) ? profile.picture : null} alt="" class="absolute inset-0 w-full h-full object-cover" loading="lazy" />
           {/if}
         </button>
         <div>
