@@ -1,7 +1,12 @@
 <script lang="ts">
   import type { NostrEvent } from '@hyprgate/types';
   import EventEmbed from './EventEmbed.svelte';
-  import { MAX_INLINE_EVENT_DEPTH, parsedRepostEvent, repostTargetId } from '../lib/rendering-fallbacks';
+  import {
+    feedEventReference,
+    MAX_INLINE_EVENT_DEPTH,
+    parsedRepostEvent,
+    repostTargetId,
+  } from '../lib/rendering-fallbacks';
   import type { ProfileContent } from '../lib/profile-metadata';
 
   interface Props {
@@ -23,12 +28,43 @@
   }: Props = $props();
   let embedded = $derived(parsedRepostEvent(event));
   let targetId = $derived(embedded?.id ?? repostTargetId(event));
+  let targetReference = $derived(targetId
+    ? feedEventReference(event, {
+      type: 'event',
+      value: targetId,
+      source: '',
+      ...(embedded ? { author: embedded.pubkey, kind: embedded.kind } : { kind: 1 }),
+    })
+    : null);
 </script>
 
 {#if embedded}
-  <EventEmbed id={embedded.id} event={embedded} label="repost" {profiles} {profileLabel} depth={depth + 1} {maxDepth} {loadResources} />
+  <EventEmbed
+    id={embedded.id}
+    event={embedded}
+    label="repost"
+    referenceAuthor={targetReference?.author}
+    referenceKind={targetReference?.kind}
+    referenceRelays={targetReference?.relays}
+    {profiles}
+    {profileLabel}
+    depth={depth + 1}
+    {maxDepth}
+    {loadResources}
+  />
 {:else if targetId}
-  <EventEmbed id={targetId} label="repost" {profiles} {profileLabel} depth={depth + 1} {maxDepth} {loadResources} />
+  <EventEmbed
+    id={targetId}
+    label="repost"
+    referenceAuthor={targetReference?.author}
+    referenceKind={targetReference?.kind}
+    referenceRelays={targetReference?.relays}
+    {profiles}
+    {profileLabel}
+    depth={depth + 1}
+    {maxDepth}
+    {loadResources}
+  />
 {:else}
   <div class="repost-empty">Repost target unavailable</div>
 {/if}

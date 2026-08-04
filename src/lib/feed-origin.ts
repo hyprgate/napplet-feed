@@ -157,7 +157,15 @@ export function subscribeForPayload(
           const event = result.event as NostrEvent;
           if (seenIds.has(event.id)) return;
           seenIds.add(event.id);
-          callbacks.onEvent(event, result.sidecar?.relayHints);
+          // Keep the complete exact-query set with the winning relay. Embedded
+          // references may only exist on a sibling pinned relay, and the runtime
+          // needs those hints for a bounded outbox.getEvent lookup.
+          callbacks.onEvent(event, [
+            ...new Set([
+              ...relayUrls,
+              ...(result.sidecar?.relayHints ?? []),
+            ]),
+          ]);
         },
         () => {
           remainingEose -= 1;

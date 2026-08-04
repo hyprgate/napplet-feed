@@ -35,7 +35,7 @@
   <RepostContent {event} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
 {:else if isFeedRenderableEvent(event)}
   <ExpandableNoteContent content={event.content} emojiTags={event.tags} {profileLabel} {loadResources} />
-  <FeedEmbeds content={event.content} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
+  <FeedEmbeds {event} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
 {:else}
   <UnsupportedEventFallback {event} />
 {/if}

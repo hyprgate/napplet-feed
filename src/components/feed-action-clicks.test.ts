@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, tick, unmount } from 'svelte';
 import type { NostrEvent } from '@hyprgate/types';
-import { inc, intent, relay } from '@napplet/sdk';
+import { inc, intent, outbox, relay } from '@napplet/sdk';
 import * as nip19 from 'nostr-tools/nip19';
 import FeedProfileHydrationHarness from './__fixtures__/FeedProfileHydrationHarness.svelte';
+import EventEmbedHydrationHarness from './__fixtures__/EventEmbedHydrationHarness.svelte';
 import EventEmbed from './EventEmbed.svelte';
 import ProfileEmbed from './ProfileEmbed.svelte';
 import ReplyContextLink from './ReplyContextLink.svelte';
@@ -28,6 +29,9 @@ vi.mock('@napplet/sdk', () => ({
   relay: {
     publish: vi.fn().mockResolvedValue({ id: 'reaction' }),
     subscribe: vi.fn().mockReturnValue({ close: vi.fn() }),
+  },
+  outbox: {
+    getEvent: vi.fn(),
   },
 }));
 
@@ -128,19 +132,137 @@ describe('feed action click wiring', () => {
     expect(document.body.textContent).not.toContain('"sig"');
   });
 
-  it('uses a note-specific fallback when an embedded note cannot be resolved', async () => {
-    vi.mocked(relay.subscribe).mockImplementation((_filters, _onEvent, onEose) => {
-      onEose?.();
-      return { close: vi.fn() };
+  it('renders nested repost quotes as Feed cards and inherits exact-relay provenance', async () => {
+    const quoted: NostrEvent = {
+      ...EVENT,
+      id: 'd'.repeat(64),
+      pubkey: 'e'.repeat(64),
+      created_at: 1782063307,
+      content: 'Nested quote content',
+    };
+    const quoteNevent = nip19.neventEncode({
+      id: quoted.id,
     });
+    const embedded: NostrEvent = {
+      ...EMBEDDED_REPOST_TARGET,
+      tags: [
+        ['e', quoted.id, '', 'mention'],
+        ['p', 'a'.repeat(64), '', 'mention'],
+      ],
+      content: `Original repost target nostr:${quoteNevent}`,
+    };
+    vi.mocked(outbox.getEvent).mockResolvedValueOnce({
+      result: {
+        event: quoted,
+        sidecar: { relayHints: ['wss://returned.example'] },
+      },
+    } as never);
+    const hydrateProfiles = vi.fn();
+
+    mount(EventEmbedHydrationHarness, {
+      target: document.body,
+      props: {
+        event: embedded,
+        referenceRelays: ['wss://sidecar.example'],
+        profiles: new Map([[embedded.pubkey, {
+          display_name: 'Embedded author',
+          picture: 'https://images.example/embedded.png',
+        }]]),
+        onHydrate: hydrateProfiles,
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(outbox.getEvent).toHaveBeenCalledWith(quoted.id, {
+        relays: ['wss://sidecar.example'],
+      });
+      expect(document.body.textContent).toContain('Nested quote content');
+    });
+    expect(hydrateProfiles).toHaveBeenCalledWith([embedded]);
+    expect(hydrateProfiles).toHaveBeenCalledWith([quoted]);
+
+    const rootEmbed = document.querySelector<HTMLElement>('[data-feed-event-embed-depth="0"]');
+    expect(rootEmbed?.querySelector('[data-feed-embed-author-label]')?.getAttribute('data-feed-embed-author-label'))
+      .toBe('Embedded author');
+    expect(rootEmbed?.querySelector('[data-feed-embed-timestamp]')).not.toBeNull();
+    expect(rootEmbed?.querySelector('img')).not.toBeNull();
+
+    rootEmbed?.querySelector<HTMLButtonElement>('[data-feed-embed-author-pubkey]')?.click();
+    await tick();
+    expect(intent.invoke).toHaveBeenLastCalledWith({
+      archetype: 'profile',
+      payload: { pubkey: embedded.pubkey },
+    });
+
+    rootEmbed?.querySelector<HTMLButtonElement>('.embed-header')?.click();
+    await tick();
+    expect(intent.invoke).toHaveBeenLastCalledWith(expect.objectContaining({
+      archetype: 'note',
+      payload: expect.objectContaining({
+        target: expect.objectContaining({
+          id: embedded.id,
+          kind: embedded.kind,
+          pubkey: embedded.pubkey,
+          nip19: expect.stringMatching(/^nevent1/),
+        }),
+        relays: ['wss://sidecar.example'],
+      }),
+    }));
+
+    const nestedEmbed = document.querySelector<HTMLElement>('[data-feed-event-embed-depth="1"]');
+    expect(nestedEmbed?.querySelector('[data-feed-embed-author-label]')?.getAttribute('data-feed-embed-author-label'))
+      .toMatch(/^npub1/);
+    nestedEmbed?.querySelector<HTMLButtonElement>('[data-feed-embed-author-pubkey]')?.click();
+    await tick();
+    expect(intent.invoke).toHaveBeenLastCalledWith({
+      archetype: 'profile',
+      payload: { pubkey: quoted.pubkey },
+    });
+
+    nestedEmbed?.querySelector<HTMLButtonElement>('.embed-header')?.click();
+    await tick();
+    expect(intent.invoke).toHaveBeenLastCalledWith(expect.objectContaining({
+      archetype: 'note',
+      payload: expect.objectContaining({
+        target: expect.objectContaining({
+          id: quoted.id,
+          kind: quoted.kind,
+          pubkey: quoted.pubkey,
+          nip19: expect.stringMatching(/^nevent1/),
+        }),
+        relays: [
+          'wss://sidecar.example',
+          'wss://returned.example',
+        ],
+      }),
+    }));
+  });
+
+  it('uses a bounded not-found state when an embedded note cannot be resolved', async () => {
+    vi.mocked(outbox.getEvent).mockResolvedValueOnce({} as never);
 
     mount(EventEmbed, {
       target: document.body,
       props: { id: 'f'.repeat(64) },
     });
-    await tick();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-feed-embed-state="not-found"]')?.textContent).toContain('Note not found.');
+    });
+    expect(outbox.getEvent).toHaveBeenCalledTimes(1);
+  });
 
-    expect(document.body.textContent).toContain('cannot render note');
+  it('distinguishes an incomplete embedded-note lookup from a definitive miss', async () => {
+    vi.mocked(outbox.getEvent).mockResolvedValueOnce({ incomplete: true } as never);
+
+    mount(EventEmbed, {
+      target: document.body,
+      props: { id: 'f'.repeat(64) },
+    });
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-feed-embed-state="error"]')?.textContent).toContain('Could not load note.');
+    });
+    expect(outbox.getEvent).toHaveBeenCalledTimes(1);
   });
 
   it('routes embedded note and profile clicks through canonical intent requests', async () => {

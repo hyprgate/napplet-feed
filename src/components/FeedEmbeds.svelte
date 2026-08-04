@@ -1,30 +1,46 @@
 <script lang="ts">
   import { extractNoteContentEmbeds } from '@hyprgate/utils';
+  import type { NostrEvent } from '@hyprgate/types';
   import EventEmbed from './EventEmbed.svelte';
   import ProfileEmbed from './ProfileEmbed.svelte';
   import ResourceEmbed from './ResourceEmbed.svelte';
-  import { MAX_INLINE_EVENT_DEPTH, isInlineDepthExhausted } from '../lib/rendering-fallbacks';
+  import {
+    feedEventReference,
+    MAX_INLINE_EVENT_DEPTH,
+    isInlineDepthExhausted,
+  } from '../lib/rendering-fallbacks';
+  import { normalizeRelayHints } from '../lib/event-relay-hints';
   import type { ProfileContent } from '../lib/profile-metadata';
 
   interface Props {
-    content: string;
+    event: NostrEvent;
     profiles?: Map<string, ProfileContent>;
     profileLabel?: (pubkey: string) => string;
     depth?: number;
     maxDepth?: number;
     loadResources?: boolean;
+    inheritedRelays?: string[];
   }
 
   let {
-    content,
+    event,
     profiles = new Map<string, ProfileContent>(),
     profileLabel = (pubkey: string) => `${pubkey.slice(0, 12)}...`,
     depth = 0,
     maxDepth = MAX_INLINE_EVENT_DEPTH,
     loadResources = true,
+    inheritedRelays = [],
   }: Props = $props();
-  let embeds = $derived(extractNoteContentEmbeds(content, 6, { includeImageUrls: false, includeResources: false }));
+  let embeds = $derived(extractNoteContentEmbeds(event.content, 6, { includeImageUrls: false, includeResources: false }));
   let canRenderNestedEvents = $derived(!isInlineDepthExhausted(depth, maxDepth));
+
+  function eventReference(embed: Extract<(typeof embeds)[number], { type: 'event' }>) {
+    const reference = feedEventReference(event, embed);
+    return {
+      ...reference,
+      relays: normalizeRelayHints([...reference.relays, ...inheritedRelays]),
+    };
+  }
 </script>
 
 {#if embeds.length > 0}
@@ -34,7 +50,19 @@
         <ProfileEmbed pubkey={embed.value} profile={profiles.get(embed.value)} {profileLabel} {loadResources} />
       {:else if embed.type === 'event'}
         {#if canRenderNestedEvents}
-          <EventEmbed id={embed.value} {profiles} {profileLabel} depth={depth + 1} {maxDepth} {loadResources} />
+          {@const reference = eventReference(embed)}
+          <EventEmbed
+            id={embed.value}
+            referenceSource={reference.source}
+            referenceAuthor={reference.author}
+            referenceKind={reference.kind}
+            referenceRelays={reference.relays}
+            {profiles}
+            {profileLabel}
+            depth={depth + 1}
+            {maxDepth}
+            {loadResources}
+          />
         {:else}
           <div class="depth-limit" data-feed-inline-depth-limit>Nested note limit reached.</div>
         {/if}

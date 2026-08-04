@@ -91,10 +91,16 @@ describe('subscribeForPayload', () => {
   it('origin:relay with AUTHOR-BEARING filters uses scoped NAP-RELAYS subscriptions', async () => {
     installShell(true);
     const relaySubs = [{ close: vi.fn() }, { close: vi.fn() }];
-    const onEvents: Array<(result: { event: NostrEvent }) => void> = [];
+    const onEvents: Array<(result: {
+      event: NostrEvent;
+      sidecar?: { relayHints?: string[] };
+    }) => void> = [];
     const onEoses: Array<() => void> = [];
     vi.mocked(relay.subscribe).mockImplementation((filters, onEvent, onEose, options) => {
-      onEvents.push(onEvent as (result: { event: NostrEvent }) => void);
+      onEvents.push(onEvent as (result: {
+        event: NostrEvent;
+        sidecar?: { relayHints?: string[] };
+      }) => void);
       onEoses.push(onEose);
       expect(filters).toEqual([{ kinds: [1], authors: ['a'.repeat(64), 'b'.repeat(64)] }]);
       return relaySubs[onEvents.length - 1]!;
@@ -118,10 +124,14 @@ describe('subscribeForPayload', () => {
     ]);
 
     const event = ev('a');
-    onEvents[0]!({ event });
+    onEvents[0]!({ event, sidecar: { relayHints: ['wss://observed'] } });
     onEvents[1]!({ event });
     expect(cbEvent).toHaveBeenCalledOnce();
-    expect(cbEvent).toHaveBeenCalledWith(event, undefined);
+    expect(cbEvent).toHaveBeenCalledWith(event, [
+      'wss://a',
+      'wss://b',
+      'wss://observed',
+    ]);
 
     onEoses[0]!();
     expect(cbEose).not.toHaveBeenCalled();

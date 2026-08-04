@@ -9,6 +9,7 @@ import {
   createFeedNoteOpenPayload,
   createFeedNoteIntentRequest,
   createFeedProfileIntentRequest,
+  createFeedReferenceOpenPayload,
   createFeedReplyComposePayload,
   createPositiveReactionTemplate,
   createReactionTemplate,
@@ -150,6 +151,28 @@ describe('feed actions', () => {
       author: event.pubkey,
       kind: event.kind,
       relays: ['wss://sidecar.example'],
+    });
+  });
+
+  it('preserves the original nevent and its decoded lookup provenance', () => {
+    const nevent = nip19.neventEncode({
+      id: EVENT.id,
+      author: EVENT.pubkey,
+      kind: EVENT.kind,
+      relays: ['wss://reference.example'],
+    });
+
+    expect(createFeedReferenceOpenPayload(`nostr:${nevent}`)).toEqual({
+      target: {
+        type: 'event',
+        id: EVENT.id,
+        kind: EVENT.kind,
+        pubkey: EVENT.pubkey,
+        nip19: nevent,
+      },
+      relays: ['wss://reference.example'],
+      behavior: { focus: true },
+      source: { napplet: 'feed' },
     });
   });
 

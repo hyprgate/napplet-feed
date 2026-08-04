@@ -1,12 +1,14 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, setContext } from 'svelte';
   import type { FeedIntentPayload, NostrEvent } from '@hyprgate/types';
   import type { Subscription } from '@napplet/sdk';
-  import { hasNsfwTag, parseNoteContent } from '@hyprgate/utils';
+  import { hasNsfwTag } from '@hyprgate/utils';
   import { createFeedStore } from '../lib/feed-store';
   import type { EngagementCounts, FeedLoadIntent, ViewMode } from '../lib/feed-store';
   import { createEmojiSetStore, type EmojiOption } from '../lib/emoji-sets';
   import { subscribeProfileMetadata, type ProfileContent } from '../lib/profile-metadata';
+  import { FEED_PROFILE_HYDRATION_CONTEXT } from '../lib/profile-hydration-context';
+  import { collectFeedProfilePubkeys } from '../lib/rendering-fallbacks';
   import {
     getViewMode as loadSharedViewMode,
     setViewMode as persistSharedViewMode,
@@ -142,7 +144,7 @@
   let profileBatchTimer: ReturnType<typeof setTimeout> | null = null;
 
   function loadMissingProfiles(events: NostrEvent[]): void {
-    const missingPubkeys = [...collectTimelineProfilePubkeys(events)]
+    const missingPubkeys = [...collectFeedProfilePubkeys(events)]
       .filter((pk) => !loadingPubkeys.has(pk) && !profileMap.has(pk));
 
     if (missingPubkeys.length === 0) return;
@@ -155,6 +157,8 @@
       flushProfileMetadataBatch();
     }, PROFILE_METADATA_BATCH_MS);
   }
+
+  setContext(FEED_PROFILE_HYDRATION_CONTEXT, loadMissingProfiles);
 
   function flushProfileMetadataBatch(): void {
     const missingPubkeys = [...queuedProfilePubkeys]
@@ -187,17 +191,6 @@
   $effect(() => {
     loadMissingProfiles(timeline);
   });
-
-  function collectTimelineProfilePubkeys(events: NostrEvent[]): Set<string> {
-    const pubkeys = new Set<string>();
-    for (const event of events) {
-      pubkeys.add(event.pubkey);
-      for (const block of parseNoteContent(event.content)) {
-        if (block.type === 'profile') pubkeys.add(block.value);
-      }
-    }
-    return pubkeys;
-  }
 
   let profiles = $derived(profileMap);
 

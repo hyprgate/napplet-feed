@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { KIND_REPOST, type NostrEvent } from '@hyprgate/types';
+import { parseNoteContent } from '@hyprgate/utils';
+import * as nip19 from 'nostr-tools/nip19';
+import { rememberEventRelayHints } from './event-relay-hints';
 import {
+  collectFeedProfilePubkeys,
+  feedEventReference,
   isFeedRenderableEvent,
   isInlineDepthExhausted,
   parsedRepostEvent,
@@ -65,5 +70,62 @@ describe('feed rendering fallback helpers', () => {
     expect(isInlineDepthExhausted(0, 2)).toBe(false);
     expect(isInlineDepthExhausted(1, 2)).toBe(false);
     expect(isInlineDepthExhausted(2, 2)).toBe(true);
+  });
+
+  it('does not guess that the supplied p mention authored its event reference', () => {
+    const quotedId = 'd'.repeat(64);
+    const quotedAuthor = 'f'.repeat(64);
+    const source = `nostr:${nip19.neventEncode({ id: quotedId })}`;
+    const suppliedShape = event({
+      tags: [
+        ['e', quotedId, '', 'mention'],
+        ['p', quotedAuthor, '', 'mention'],
+      ],
+      content: `quoted ${source}`,
+    });
+    const block = parseNoteContent(suppliedShape.content).find((item) => item.type === 'event');
+
+    expect(block?.type).toBe('event');
+    if (!block || block.type !== 'event') throw new Error('expected event reference');
+    expect(feedEventReference(suppliedShape, block)).toEqual({
+      id: quotedId,
+      source,
+      relays: [],
+    });
+  });
+
+  it('merges decoded, tag, and sidecar hints and collects nested authors for shared hydration', () => {
+    const quotedId = 'd'.repeat(64);
+    const quotedAuthor = 'f'.repeat(64);
+    const nevent = nip19.neventEncode({
+      id: quotedId,
+      author: quotedAuthor,
+      kind: 1,
+      relays: ['wss://nevent.example'],
+    });
+    const embedded = event({
+      id: TARGET.id,
+      pubkey: TARGET.pubkey,
+      tags: [['q', quotedId, 'wss://tag.example', quotedAuthor]],
+      content: `quoted nostr:${nevent}`,
+    });
+    rememberEventRelayHints(embedded, ['wss://sidecar.example']);
+    const block = parseNoteContent(embedded.content).find((item) => item.type === 'event');
+
+    if (!block || block.type !== 'event') throw new Error('expected event reference');
+    expect(feedEventReference(embedded, block)).toEqual({
+      id: quotedId,
+      source: `nostr:${nevent}`,
+      author: quotedAuthor,
+      kind: 1,
+      relays: ['wss://nevent.example', 'wss://tag.example', 'wss://sidecar.example'],
+    });
+
+    const repost = event({ kind: KIND_REPOST, content: JSON.stringify(embedded) });
+    expect(collectFeedProfilePubkeys([repost])).toEqual(new Set([
+      repost.pubkey,
+      embedded.pubkey,
+      quotedAuthor,
+    ]));
   });
 });
