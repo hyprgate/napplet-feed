@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import type { NostrEvent } from 'applesauce-core/helpers/event';
+  import { KIND_REACTION } from '@hyprgate/types';
   import { format } from 'timeago.js';
   import * as nip19 from 'nostr-tools/nip19';
   import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
@@ -58,7 +59,7 @@
   }
 
   function getAuthorName(pubkey: string, profile?: ProfileContent): string {
-    return profile?.display_name ?? profile?.name ?? shortenPubkey(pubkey);
+    return profile?.display_name ?? profile?.displayName ?? profile?.name ?? profile?.nip05 ?? shortenPubkey(pubkey);
   }
 
   function profileLabel(pubkey: string): string {
@@ -180,6 +181,7 @@
             class="font-semibold font-mono hover:underline cursor-pointer bg-transparent border-none p-0 block"
             style={pubkeyColorStyle(event.pubkey)}
             onclick={() => openProfile(event.pubkey)}
+            title={isCanonicalHexPubkey(event.pubkey) ? nip19.npubEncode(event.pubkey) : event.pubkey}
             data-feed-author-pubkey={event.pubkey}
             data-feed-author-label={getAuthorName(event.pubkey, profile)}
           >
@@ -195,9 +197,11 @@
             {/if}
           </div>
         </div>
-        <div class="ml-auto">
-          <EngagementPills {event} engagement={counts} active={hoveredCardId === event.id} loadResources={resourceEventIds.has(event.id)} />
-        </div>
+        {#if event.kind !== KIND_REACTION}
+          <div class="ml-auto">
+            <EngagementPills {event} engagement={counts} active={hoveredCardId === event.id} loadResources={resourceEventIds.has(event.id)} />
+          </div>
+        {/if}
       </div>
       {#if replyContext}
         <div class="reply-context" aria-label="Reply context">

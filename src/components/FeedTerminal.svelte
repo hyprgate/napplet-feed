@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { NostrEvent } from 'applesauce-core/helpers/event';
+  import { KIND_REACTION } from '@hyprgate/types';
   import * as nip19 from 'nostr-tools/nip19';
-  import { clientTagValue, pubkeyColorStyle } from '@hyprgate/utils';
+  import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle } from '@hyprgate/utils';
   import type { EngagementCounts } from '../lib/feed-store';
   import {
     FEED_LOAD_THRESHOLDS,
@@ -9,11 +11,14 @@
     type FeedLoadIntent,
   } from '../lib/feed-load-strategy';
   import { createEngagementVisibilityTracker } from '../lib/feed-visible-targets';
+  import { createFeedResourceVisibilityTracker } from '../lib/feed-resource-visibility';
   import { attachScrollKeyListener } from '../lib/keyboard-scroll';
   import type { ProfileContent } from '../lib/profile-metadata';
   import { previewContent, replyContextForEvent, shouldTruncateContent, terminalEngagementLabel } from '../lib/note-presentation';
   import { terminalEventContent } from '../lib/rendering-fallbacks';
   import ReplyContextLink from './ReplyContextLink.svelte';
+  import ReactionContent from './ReactionContent.svelte';
+  import { createFeedProfileIntentRequest, invokeFeedIntent } from '../lib/feed-actions';
 
   interface Props {
     events: NostrEvent[];
@@ -37,7 +42,12 @@
   }
 
   function getAuthorName(pubkey: string, profile?: ProfileContent): string {
-    return profile?.display_name ?? profile?.name ?? shortenPubkey(pubkey);
+    return profile?.display_name ?? profile?.displayName ?? profile?.name ?? profile?.nip05 ?? shortenPubkey(pubkey);
+  }
+
+  async function openProfile(pubkey: string): Promise<void> {
+    const request = createFeedProfileIntentRequest(pubkey);
+    if (request) await invokeFeedIntent(request);
   }
 
   function formatTimestamp(unixSecs: number): string {
@@ -64,6 +74,19 @@
     () => events,
     () => onVisibleEventsChange,
   );
+  let resourceEventIds = $state(new Set<string>());
+  const resourceVisibility = createFeedResourceVisibilityTracker(
+    () => scroller,
+    () => events,
+    (ids) => { resourceEventIds = new Set(ids); },
+  );
+  const trackResourceVisibility = resourceVisibility.track;
+  onDestroy(resourceVisibility.destroy);
+
+  $effect(() => {
+    events.length;
+    resourceVisibility.refresh();
+  });
 
   function maybeLoadMore(intent: FeedLoadIntent = 'prefetch'): void {
     if (!canLoadMore) return;
@@ -75,6 +98,11 @@
     const remainingPx = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     const intent = getProactiveLoadIntent(remainingPx, scroller.clientHeight);
     if (intent) maybeLoadMore(intent);
+  }
+
+  function handleScroll(): void {
+    loadMoreForScrollPosition();
+    resourceVisibility.refresh();
   }
 
   // Issue #183: PageUp/PageDown/Home/End scroll the container explicitly, so they
@@ -114,7 +142,7 @@
   tabindex="-1"
   role="group"
   aria-label="Feed"
-  onscroll={loadMoreForScrollPosition}
+  onscroll={handleScroll}
 >
   {#each events as event (event.id)}
     {@const profile = profiles.get(event.pubkey)}
@@ -125,18 +153,35 @@
       class="px-2 py-0.5 hover:bg-bg-surface leading-tight text-sm whitespace-pre-wrap break-words"
       style={pubkeyColorStyle(event.pubkey)}
       use:trackEngagementVisibility={event.id}
-      data-feed-author-pubkey={event.pubkey}
-      data-feed-author-label={getAuthorName(event.pubkey, profile)}
+      use:trackResourceVisibility={event.id}
+      data-feed-event-id={event.id}
+      data-feed-resources-enabled={resourceEventIds.has(event.id)}
     >
       <span>[{formatTimestamp(event.created_at)}]</span>
-      <span> &lt;{getAuthorName(event.pubkey, profile)}&gt;</span>
+      <button
+        type="button"
+        class="terminal-author"
+        title={isCanonicalHexPubkey(event.pubkey) ? nip19.npubEncode(event.pubkey) : event.pubkey}
+        data-feed-author-pubkey={event.pubkey}
+        data-feed-author-label={getAuthorName(event.pubkey, profile)}
+        onclick={() => openProfile(event.pubkey)}
+      >&lt;{getAuthorName(event.pubkey, profile)}&gt;</button>
       {#if client}<span class="opacity-70"> (via {client})</span>{/if}
       {#if replyContext}
         <span> [{replyContext.label}: <ReplyContextLink reference={replyContext.parent} />{#if replyContext.root} / root <ReplyContextLink reference={replyContext.root} />{/if}]</span>
       {/if}
-      <span> [{terminalEngagementLabel(counts)}]</span>
-      <span> {eventContent(event)}</span>
+      {#if event.kind === KIND_REACTION}
+        <ReactionContent {event} {profiles} compact loadResources={resourceEventIds.has(event.id)} />
+      {:else}
+        <span> [{terminalEngagementLabel(counts)}]</span>
+        <span> {eventContent(event)}</span>
+      {/if}
     </div>
   {/each}
   <div bind:this={sentinel} class="h-4"></div>
 </div>
+
+<style>
+  .terminal-author { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .terminal-author:hover { text-decoration: underline; }
+</style>

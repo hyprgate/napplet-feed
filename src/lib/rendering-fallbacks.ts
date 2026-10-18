@@ -1,5 +1,6 @@
 import {
   KIND_NOTE,
+  KIND_REACTION,
   KIND_REPOST,
   type NostrEvent,
 } from '@hyprgate/types';
@@ -10,6 +11,7 @@ import {
 } from '@hyprgate/utils';
 import { normalizeRelayHints, relayHintsForEvent } from './event-relay-hints';
 import { previewContent } from './note-presentation';
+import { reactionPresentation, reactionTarget } from './reaction-presentation';
 
 export const KIND_COMMENT = 1111;
 export const MAX_INLINE_EVENT_DEPTH = 2;
@@ -25,7 +27,7 @@ export interface FeedEventReference {
 }
 
 export function isFeedRenderableEvent(event: NostrEvent): boolean {
-  return event.kind === KIND_NOTE || event.kind === KIND_COMMENT || event.kind === KIND_REPOST;
+  return event.kind === KIND_NOTE || event.kind === KIND_COMMENT || event.kind === KIND_REPOST || event.kind === KIND_REACTION;
 }
 
 export function parsedRepostEvent(event: NostrEvent): NostrEvent | null {
@@ -102,6 +104,11 @@ export function collectFeedProfilePubkeys(events: NostrEvent[]): Set<string> {
     visited.add(event.id);
     add(event.pubkey);
 
+    if (event.kind === KIND_REACTION) {
+      add(reactionTarget(event)?.author);
+      return;
+    }
+
     if (event.kind === KIND_REPOST) {
       const embedded = parsedRepostEvent(event);
       if (embedded && depth < MAX_INLINE_EVENT_DEPTH) {
@@ -126,6 +133,11 @@ export function collectFeedProfilePubkeys(events: NostrEvent[]): Set<string> {
 }
 
 export function terminalEventContent(event: NostrEvent): string {
+  if (event.kind === KIND_REACTION) {
+    const reaction = reactionPresentation(event);
+    const target = reactionTarget(event);
+    return `${reaction.label}${reaction.value ? ` ${reaction.value}` : ''} → ${target ? `${target.id.slice(0, 12)}…` : 'Reaction target unavailable'}`;
+  }
   if (event.kind === KIND_REPOST) {
     const embedded = parsedRepostEvent(event);
     if (embedded) return `repost: ${previewContent(embedded.content || '[empty note]', 180, 3)}`;

@@ -32,7 +32,7 @@
     const request = createFeedComposerIntentRequest(createFeedReplyComposePayload(event));
     if (!request) return;
     const result = await invokeFeedIntent(request);
-    if (!result.handled) error = result.error;
+    if (!result.accepted) error = result.error;
   }
 
   async function openNoteViewer(): Promise<void> {
@@ -40,7 +40,7 @@
     const request = createFeedNoteIntentRequest(event);
     if (!request) return;
     const result = await invokeFeedIntent(request);
-    if (!result.handled) error = result.error;
+    if (!result.accepted) error = result.error;
   }
 
   async function react(input: string | ReturnType<typeof reactionInputFromEmojiOption>): Promise<void> {

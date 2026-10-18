@@ -2,6 +2,7 @@
   import { format } from 'timeago.js';
   import * as nip19 from 'nostr-tools/nip19';
   import type { NostrEvent } from 'applesauce-core/helpers/event';
+  import { KIND_REACTION } from '@hyprgate/types';
   import { clientTagValue, isCanonicalHexPubkey, pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
   import { createFeedProfileIntentRequest, invokeFeedIntent } from '../lib/feed-actions';
   import type { EngagementCounts } from '../lib/feed-store';
@@ -40,7 +41,9 @@
 
   let authorName = $derived.by(() => {
     if (profile?.display_name) return profile.display_name;
+    if (profile?.displayName) return profile.displayName;
     if (profile?.name) return profile.name;
+    if (profile?.nip05) return profile.nip05;
     return shortenPubkey(event.pubkey);
   });
 
@@ -58,7 +61,7 @@
 
   function profileLabel(pubkey: string): string {
     const referencedProfile = profiles.get(pubkey);
-    return referencedProfile?.display_name ?? referencedProfile?.name ?? shortenPubkey(pubkey);
+    return referencedProfile?.display_name ?? referencedProfile?.displayName ?? referencedProfile?.name ?? referencedProfile?.nip05 ?? shortenPubkey(pubkey);
   }
 </script>
 
@@ -89,6 +92,7 @@
         class="text-sm font-semibold font-mono truncate hover:underline cursor-pointer bg-transparent border-none p-0"
         style={pubkeyColorStyle(event.pubkey)}
         onclick={openProfile}
+        title={isCanonicalHexPubkey(event.pubkey) ? nip19.npubEncode(event.pubkey) : event.pubkey}
         data-feed-author-pubkey={event.pubkey}
         data-feed-author-label={authorName}
       >
@@ -101,9 +105,11 @@
       {#if replyContext}
         <span class="reply-badge">{replyContext.label}</span>
       {/if}
-      <div class="ml-auto">
-        <EngagementPills {event} {engagement} compact active={hovered} {loadResources} />
-      </div>
+      {#if event.kind !== KIND_REACTION}
+        <div class="ml-auto">
+          <EngagementPills {event} {engagement} compact active={hovered} {loadResources} />
+        </div>
+      {/if}
     </div>
 
     {#if replyContext}

@@ -1,9 +1,10 @@
-import { inc } from '@napplet/sdk';
+import { intent } from '@napplet/sdk';
 import type { FeedIntentPayload } from '@hyprgate/types';
 import { validateFeedIntentPayload } from '@hyprgate/utils';
 
-export type IncEvent = Parameters<Parameters<typeof inc.on>[1]>[0];
+export type IntentDelivery = Parameters<Parameters<typeof intent.onDelivery>[0]>[0];
 
-export function feedPayloadFromIncEvent(event: IncEvent): FeedIntentPayload | null {
+export function feedPayloadFromIntentDelivery(event: IntentDelivery): FeedIntentPayload | null {
+  if (event.archetype !== 'feed' || event.action !== 'open' || event.convention !== 'napplet:feed/open') return null;
   return validateFeedIntentPayload(event.payload);
 }

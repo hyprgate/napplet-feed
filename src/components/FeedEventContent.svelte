@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { NostrEvent } from '@hyprgate/types';
-  import { KIND_REPOST } from '@hyprgate/types';
+  import { KIND_REACTION, KIND_REPOST } from '@hyprgate/types';
   import type { EmojiOption } from '../lib/emoji-sets';
   import { isFeedRenderableEvent, MAX_INLINE_EVENT_DEPTH } from '../lib/rendering-fallbacks';
   import type { ProfileContent } from '../lib/profile-metadata';
@@ -8,6 +8,7 @@
   import FeedEmbeds from './FeedEmbeds.svelte';
   import NoteActions from './NoteActions.svelte';
   import RepostContent from './RepostContent.svelte';
+  import ReactionContent from './ReactionContent.svelte';
   import UnsupportedEventFallback from './UnsupportedEventFallback.svelte';
 
   interface Props {
@@ -31,7 +32,9 @@
   }: Props = $props();
 </script>
 
-{#if event.kind === KIND_REPOST}
+{#if event.kind === KIND_REACTION}
+  <ReactionContent {event} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
+{:else if event.kind === KIND_REPOST}
   <RepostContent {event} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
 {:else if isFeedRenderableEvent(event)}
   <ExpandableNoteContent content={event.content} emojiTags={event.tags} {profileLabel} {loadResources} />
@@ -39,6 +42,6 @@
 {:else}
   <UnsupportedEventFallback {event} />
 {/if}
-{#if depth === 0}
+{#if depth === 0 && event.kind !== KIND_REACTION}
   <NoteActions {event} {reactionOptions} {loadResources} />
 {/if}

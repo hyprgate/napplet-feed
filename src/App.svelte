@@ -1,17 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { inc, identity } from '@napplet/sdk';
-  // Local alias kept for the existing identity:changed subscriptions below.
-  const ipc = inc;
+  import { identity, intent } from '@napplet/sdk';
   import type { FeedIntentPayload } from '@hyprgate/types';
   import {
-    IDENTITY_CHANGED_TOPIC,
-    LEGACY_AUTH_IDENTITY_CHANGED_TOPIC,
-    parseIdentityChangedPayload,
     waitForPublicKey,
   } from '@hyprgate/utils';
   import { getInstancePayload, setInstancePayload } from './lib/feed-storage';
-  import { feedPayloadFromIncEvent } from './feed-intent-delivery.js';
+  import { feedPayloadFromIntentDelivery } from './feed-intent-delivery.js';
   import FeedContainer from './components/FeedContainer.svelte';
 
   // ── App state ──────────────────────────────────────────────────────────────
@@ -24,40 +19,27 @@
   let hasPayload = $derived(payload != null);
   let payloadStartupResolved = $state(false);
 
-  /** The inc topic the feed emits once subscribed to feed:open (Pitfall 2). */
-  const FEED_READY_TOPIC = 'feed:ready';
-
   // ── Listen for identity + intent payload from shell ─────────────────────────
   // Use onMount (not $effect) to avoid Svelte 5 reactivity loops —
   // on() callbacks write to $state which must not re-trigger the subscription setup.
   onMount(() => {
     const controller = new AbortController();
 
-    const handleIdentityChanged = (event) => {
-      const identityChange = parseIdentityChangedPayload(event.payload);
-      if (identityChange) pubkey = identityChange.pubkey;
-    };
-    const canonicalSub = ipc.on(IDENTITY_CHANGED_TOPIC, handleIdentityChanged);
-    const legacySub = ipc.on(LEGACY_AUTH_IDENTITY_CHANGED_TOPIC, handleIdentityChanged);
+    const identitySub = identity.onChanged((nextPubkey) => {
+      pubkey = nextPubkey || null;
+    });
 
-    // feed:open — the intent payload targeted at THIS window (NAP-INTENT). The
-    // payload crosses the napplet trust boundary, so it is UNTRUSTED: validate
-    // before applying (T-88-09); invalid payloads are dropped. A valid payload
-    // is applied to the render path and persisted per-window so reload restores it.
+    // Validate the target contract and payload before applying and persisting it.
     const applyPayload = (event): void => {
-      const valid = feedPayloadFromIncEvent(event);
+      const valid = feedPayloadFromIntentDelivery(event);
       if (!valid) return;
       payload = valid;
       payloadStartupResolved = true;
       void setInstancePayload(valid);
     };
-    // inc.on('feed:open', …) — the canonical NAP-INTENT delivery seam (key_link).
-    const feedOpenSub = inc.on('feed:open', applyPayload);
+    const feedOpenSub = intent.onDelivery(applyPayload);
 
-    // Boot precedence (RESEARCH §Backward-compat): persisted instance payload >
-    // intent feed:open payload (live above) > following-default (if pubkey) >
-    // empty state. Restore the persisted payload first; a live feed:open
-    // overrides it (the controller flushes after feed:ready, below).
+    // Buffered/live delivery takes precedence over asynchronous persisted state.
     void getInstancePayload().then((restored) => {
       if (controller.signal.aborted) return;
       if (restored && payload == null) payload = restored;
@@ -65,11 +47,6 @@
     }).catch(() => {
       if (!controller.signal.aborted) payloadStartupResolved = true;
     });
-
-    // Emit feed:ready AFTER the feed:open subscription is registered so the
-    // Plan 01 controller flushes the buffered payload only once we can receive
-    // it (delivery race — Pitfall 2).
-    ipc.emit(FEED_READY_TOPIC);
 
     void waitForPublicKey(identity, {
       signal: controller.signal,
@@ -80,8 +57,7 @@
 
     return () => {
       controller.abort();
-      canonicalSub.close();
-      legacySub.close();
+      identitySub.close();
       feedOpenSub.close();
     };
   });

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import UnoCSS from '@unocss/vite';
@@ -7,19 +8,17 @@ export default defineConfig({
   plugins: [
     UnoCSS(),
     svelte(),
-    // The sealed public plugin emits the canonical
-    // ['archetype', slug, 'napplet:<archetype>/<intent>'] manifest tag at build
-    // time. The resolution-sim harness serves it verbatim — no serve-time
-    // injection or re-sign.
+    // The plugin emits independent z/i advertisements in the signed manifest.
     nip5aManifest({
       nappletType: 'feed',
       // Phase 88 (FEED-02): the feed now routes its timeline through the
       // NAP-OUTBOX service (origin:'outbox' discovery + origin:'relay' exact
-      // pin). The runtime ACL gates service messages by declared capability, so
-      // WITHOUT 'outbox' here every outbox.subscribe is silently dropped and the
-      // feed never fetches. (Found via the feed-intent e2e: supports('outbox')
-      // was true shell-side but the router was never reached — missing capability.)
-      requires: ['identity', 'relay', 'inc', 'outbox', 'storage', 'resource', 'theme'],
+      // pin) and opens related apps through NAP-INTENT. The runtime ACL gates
+      // service messages by declared capability, so both services must be in
+      // the signed manifest rather than granted by a host compatibility shim.
+      requires: ['identity', 'relay', 'inc', 'intent', 'outbox', 'storage', 'resource'],
+      optional: ['theme'],
+      icon: { data: readFileSync(new URL('./icon.png', import.meta.url)), mimeType: 'image/png' },
       artifactMode: 'single-file',
       archetypes: [{ slug: 'feed', convention: 'napplet:feed/open' }],
     }),

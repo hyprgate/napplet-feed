@@ -5,7 +5,7 @@ import FeedCards from './FeedCards.svelte';
 import FeedList from './FeedList.svelte';
 import FeedTerminal from './FeedTerminal.svelte';
 import type { FeedLoadIntent } from '../lib/feed-store';
-import { feedPayloadFromIncEvent, type IncEvent } from '../feed-intent-delivery';
+import { feedPayloadFromIntentDelivery, type IntentDelivery } from '../feed-intent-delivery';
 
 vi.mock('@napplet/sdk', () => ({
   inc: {
@@ -150,16 +150,16 @@ describe('feed proactive load intents', () => {
   });
 });
 
-describe('feed canonical INC delivery adapter', () => {
+describe('feed canonical INTENT delivery adapter', () => {
   const payload = { filters: [{ kinds: [1] }], origin: 'outbox' };
 
-  it.each(['warm direct', 'cold persisted state followed by a warm update'])('accepts a valid %s IncEvent payload', (delivery) => {
+  it.each(['warm direct', 'cold persisted state followed by a warm update'])('accepts a valid %s IntentDelivery payload', (delivery) => {
     expect(delivery).toBeTruthy();
-    expect(feedPayloadFromIncEvent({ topic: 'feed:open', sender: 'hyprgate-shell', payload } as IncEvent)).toEqual(payload);
+    expect(feedPayloadFromIntentDelivery({ archetype: 'feed', action: 'open', convention: 'napplet:feed/open', sender: 'hyprgate-shell', payload } as IntentDelivery)).toEqual(payload);
   });
 
-  it('rejects absent and malformed IncEvent payloads', () => {
-    expect(feedPayloadFromIncEvent({ topic: 'feed:open', sender: 'hyprgate-shell' } as IncEvent)).toBeNull();
-    expect(feedPayloadFromIncEvent({ topic: 'feed:open', sender: 'hyprgate-shell', payload: { origin: 'outbox' } } as IncEvent)).toBeNull();
+  it('rejects absent and malformed IntentDelivery payloads', () => {
+    expect(feedPayloadFromIntentDelivery({ archetype: 'feed', action: 'open', convention: 'napplet:feed/open', sender: 'hyprgate-shell' } as IntentDelivery)).toBeNull();
+    expect(feedPayloadFromIntentDelivery({ archetype: 'feed', action: 'open', convention: 'napplet:feed/open', sender: 'hyprgate-shell', payload: { origin: 'outbox' } } as IntentDelivery)).toBeNull();
   });
 });

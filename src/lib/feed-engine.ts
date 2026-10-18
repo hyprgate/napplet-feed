@@ -120,7 +120,9 @@ function removeTimelineEvent(ctx: FeedContext, eventId: string): boolean {
   if (allIndex === -1) return false;
   ctx.timelineEvents.splice(allIndex, 1);
   const index = ctx.state.timeline.findIndex((event) => event.id === eventId);
-  if (index !== -1) ctx.state.timeline.splice(index, 1);
+  if (index !== -1) {
+    ctx.state.timeline = ctx.state.timeline.filter((event) => event.id !== eventId);
+  }
   ctx.seenIds.delete(eventId);
   return true;
 }

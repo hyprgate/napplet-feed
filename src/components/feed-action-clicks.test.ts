@@ -13,17 +13,17 @@ import NoteActions from './NoteActions.svelte';
 import NoteEntry from './NoteEntry.svelte';
 
 vi.mock('@napplet/sdk', () => ({
+  intentInvoke: (...args: Parameters<typeof intent.invoke>) => intent.invoke(...args),
   inc: {
     emit: vi.fn(),
   },
   intent: {
-    invoke: vi.fn(async (request: { archetype: string; action?: string }) => ({
+    invoke: vi.fn(async (uri: string) => ({
       ok: true,
-      archetype: request.archetype,
-      action: request.action ?? 'open',
-      handled: true,
-      handler: request.archetype,
-      windowId: `${request.archetype}-window`,
+      archetype: uri.slice('napplet:'.length).split('/')[0],
+      action: uri.split('/')[1],
+      convention: uri,
+      handler: `nip5d:35129:${'a'.repeat(64)}:test-handler`,
     })),
   },
   relay: {
@@ -189,15 +189,13 @@ describe('feed action click wiring', () => {
 
     rootEmbed?.querySelector<HTMLButtonElement>('[data-feed-embed-author-pubkey]')?.click();
     await tick();
-    expect(intent.invoke).toHaveBeenLastCalledWith({
-      archetype: 'profile',
+    expect(intent.invoke).toHaveBeenLastCalledWith('napplet:profile/open', {
       payload: { pubkey: embedded.pubkey },
     });
 
     rootEmbed?.querySelector<HTMLButtonElement>('.embed-header')?.click();
     await tick();
-    expect(intent.invoke).toHaveBeenLastCalledWith(expect.objectContaining({
-      archetype: 'note',
+    expect(intent.invoke).toHaveBeenLastCalledWith('napplet:note/open', expect.objectContaining({
       payload: expect.objectContaining({
         target: expect.objectContaining({
           id: embedded.id,
@@ -214,15 +212,13 @@ describe('feed action click wiring', () => {
       .toMatch(/^npub1/);
     nestedEmbed?.querySelector<HTMLButtonElement>('[data-feed-embed-author-pubkey]')?.click();
     await tick();
-    expect(intent.invoke).toHaveBeenLastCalledWith({
-      archetype: 'profile',
+    expect(intent.invoke).toHaveBeenLastCalledWith('napplet:profile/open', {
       payload: { pubkey: quoted.pubkey },
     });
 
     nestedEmbed?.querySelector<HTMLButtonElement>('.embed-header')?.click();
     await tick();
-    expect(intent.invoke).toHaveBeenLastCalledWith(expect.objectContaining({
-      archetype: 'note',
+    expect(intent.invoke).toHaveBeenLastCalledWith('napplet:note/open', expect.objectContaining({
       payload: expect.objectContaining({
         target: expect.objectContaining({
           id: quoted.id,
@@ -278,8 +274,7 @@ describe('feed action click wiring', () => {
 
     document.querySelector<HTMLButtonElement>('.embed-header')?.click();
     await tick();
-    expect(intent.invoke).toHaveBeenCalledWith({
-      archetype: 'note',
+    expect(intent.invoke).toHaveBeenCalledWith('napplet:note/open', {
       behavior: { focus: true },
       payload: {
         target: { type: 'event', id: EVENT.id, kind: EVENT.kind, pubkey: EVENT.pubkey },
@@ -291,8 +286,7 @@ describe('feed action click wiring', () => {
 
     document.querySelector<HTMLButtonElement>('[data-profile-embed]')?.click();
     await tick();
-    expect(intent.invoke).toHaveBeenLastCalledWith({
-      archetype: 'profile',
+    expect(intent.invoke).toHaveBeenLastCalledWith('napplet:profile/open', {
       payload: { pubkey: EVENT.pubkey },
     });
     expect(inc.emit).not.toHaveBeenCalled();
@@ -324,8 +318,7 @@ describe('feed action click wiring', () => {
 
     document.querySelector<HTMLButtonElement>('.reply-context-link')?.click();
     await tick();
-    expect(intent.invoke).toHaveBeenCalledWith({
-      archetype: 'note',
+    expect(intent.invoke).toHaveBeenCalledWith('napplet:note/open', {
       behavior: { focus: true },
       payload: {
         target: { type: 'event', id: replyId },
@@ -337,8 +330,7 @@ describe('feed action click wiring', () => {
 
     document.querySelector<HTMLButtonElement>('[data-feed-author-pubkey]')?.click();
     await tick();
-    expect(intent.invoke).toHaveBeenLastCalledWith({
-      archetype: 'profile',
+    expect(intent.invoke).toHaveBeenLastCalledWith('napplet:profile/open', {
       payload: { pubkey: EVENT.pubkey },
     });
     expect(inc.emit).not.toHaveBeenCalled();
@@ -392,8 +384,7 @@ describe('feed action click wiring', () => {
 
     document.querySelectorAll('button')[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
-    expect(intent.invoke).toHaveBeenCalledWith({
-      archetype: 'note',
+    expect(intent.invoke).toHaveBeenCalledWith('napplet:note/open', {
       behavior: { focus: true },
       payload: {
         target: { type: 'event', id: EVENT.id, kind: EVENT.kind, pubkey: EVENT.pubkey },
@@ -404,8 +395,7 @@ describe('feed action click wiring', () => {
 
     document.querySelectorAll('button')[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
-    expect(intent.invoke).toHaveBeenLastCalledWith({
-      archetype: 'composer',
+    expect(intent.invoke).toHaveBeenLastCalledWith('napplet:composer/open', {
       payload: {
         source: { napplet: 'feed' },
         intent: 'reply',
@@ -425,7 +415,6 @@ describe('feed action click wiring', () => {
       ok: false,
       archetype: 'note',
       action: 'open',
-      handled: false,
       error: 'No note handler is available',
     });
     mount(NoteActions, {
@@ -456,7 +445,8 @@ describe('feed action click wiring', () => {
     authorButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
 
-    expect(intent.invoke).toHaveBeenCalledWith({ archetype: 'profile', payload: { pubkey: EVENT.pubkey } });
+    expect(intent.invoke).toHaveBeenCalledWith('napplet:profile/open', {
+      payload: { pubkey: EVENT.pubkey } });
   });
 
   it('clicking an inline note reference invokes a canonical note target', async () => {
@@ -471,8 +461,7 @@ describe('feed action click wiring', () => {
     document.querySelector<HTMLButtonElement>('.note-content .ref')?.click();
     await tick();
 
-    expect(intent.invoke).toHaveBeenCalledWith({
-      archetype: 'note',
+    expect(intent.invoke).toHaveBeenCalledWith('napplet:note/open', {
       behavior: { focus: true },
       payload: {
         target: { type: 'event', id: targetId, nip19: note },
@@ -499,8 +488,7 @@ describe('feed action click wiring', () => {
     document.querySelector<HTMLButtonElement>('.note-content .ref')?.click();
     await tick();
 
-    expect(intent.invoke).toHaveBeenCalledWith({
-      archetype: 'note',
+    expect(intent.invoke).toHaveBeenCalledWith('napplet:note/open', {
       behavior: { focus: true },
       payload: {
         target: { type: 'address', kind: 30023, pubkey, identifier: 'article', nip19: naddr },
@@ -586,8 +574,7 @@ describe('feed action click wiring', () => {
       .querySelector<HTMLButtonElement>(`[data-profile-embed-pubkey="${npubMentionPubkey}"]`)
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
-    expect(intent.invoke).toHaveBeenLastCalledWith({
-      archetype: 'profile',
+    expect(intent.invoke).toHaveBeenLastCalledWith('napplet:profile/open', {
       payload: { pubkey: npubMentionPubkey },
     });
 

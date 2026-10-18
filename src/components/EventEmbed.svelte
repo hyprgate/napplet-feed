@@ -3,7 +3,7 @@
   import { format } from 'timeago.js';
   import * as nip19 from 'nostr-tools/nip19';
   import type { NostrEvent } from '@hyprgate/types';
-  import { KIND_REPOST } from '@hyprgate/types';
+  import { KIND_REACTION, KIND_REPOST } from '@hyprgate/types';
   import { outbox } from '@napplet/sdk';
   import { createNoteViewerOpenPayload, pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
   import { isFeedRenderableEvent, isInlineDepthExhausted, MAX_INLINE_EVENT_DEPTH } from '../lib/rendering-fallbacks';
@@ -22,6 +22,7 @@
   import ExpandableNoteContent from './ExpandableNoteContent.svelte';
   import FeedEmbeds from './FeedEmbeds.svelte';
   import RepostContent from './RepostContent.svelte';
+  import ReactionContent from './ReactionContent.svelte';
   import UnsupportedEventFallback from './UnsupportedEventFallback.svelte';
   import type { ProfileContent } from '../lib/profile-metadata';
 
@@ -87,10 +88,18 @@
     ...fetchedRelayHints,
     ...(event ? relayHintsForEvent(event) : []),
   ]));
+  let referenceTarget = $derived(referenceSource ? createFeedReferenceOpenPayload(referenceSource)?.target : undefined);
+  let addressTarget = $derived(referenceTarget?.type === 'address' ? referenceTarget : undefined);
+  let addressablePreview = $derived(event && event.kind >= 30000 && event.kind < 40000);
+  let title = $derived(event?.tags.find((tag) => tag[0] === 'title' || tag[0] === 'name')?.[1]);
+  let summary = $derived(event?.tags.find((tag) => tag[0] === 'summary')?.[1]);
   let canonicalIdentity = $derived(event ? npubFor(event.pubkey) : '');
 
   function openPayload() {
     const referencePayload = referenceSource ? createFeedReferenceOpenPayload(referenceSource) : null;
+    if (referencePayload?.target.type === 'address' && (!event || matchesAddress(event))) {
+      return { ...referencePayload, ...(relayHints.length > 0 ? { relays: relayHints } : {}) };
+    }
     if (event) {
       const payload = createFeedNoteOpenPayload(event, relayHints);
       if (!payload || !referencePayload || referencePayload.target.type !== 'event') return payload;
@@ -138,6 +147,12 @@
     if (request) await invokeFeedIntent(request);
   }
 
+  function matchesAddress(candidate: NostrEvent): boolean {
+    return !!addressTarget && candidate.kind === addressTarget.kind
+      && candidate.pubkey === addressTarget.pubkey
+      && candidate.tags.find((tag) => tag[0] === 'd')?.[1] === addressTarget.identifier;
+  }
+
   onMount(() => {
     if (providedEvent) {
       hydrateProfiles?.([providedEvent]);
@@ -146,11 +161,20 @@
     let disposed = false;
     void (async () => {
       try {
-        const result = await outbox.getEvent(id, {
+        let result = await outbox.getEvent(id, {
           ...(referenceAuthor ? { author: referenceAuthor } : {}),
           ...(relayHints.length > 0 ? { relays: relayHints } : {}),
         });
         if (disposed) return;
+        if (!result.result?.event && addressTarget) {
+          const addressResult = await outbox.query({
+            kinds: [addressTarget.kind], authors: [addressTarget.pubkey], '#d': [addressTarget.identifier], limit: 1,
+          }, { relays: relayHints, timeoutMs: 5000 });
+          if (disposed) return;
+          const latest = addressResult.events.filter((item) => matchesAddress(item.event as NostrEvent))
+            .sort((a, b) => b.event.created_at - a.event.created_at || a.event.id.localeCompare(b.event.id))[0];
+          result = { ...addressResult, ...(latest ? { result: latest } : {}) };
+        }
         if (result.result?.event) {
           const resolvedEvent = result.result.event as NostrEvent;
           fetchedRelayHints = normalizeRelayHints(result.result.sidecar?.relayHints);
@@ -197,8 +221,22 @@
           <span class="timestamp" data-feed-embed-timestamp>{format(event.created_at * 1000)}</span>
         </span>
       </button>
-      {#if event.kind === KIND_REPOST}
-        <RepostContent {event} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
+      {#if event.kind === KIND_REACTION}
+        <ReactionContent {event} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
+      {:else if event.kind === KIND_REPOST}
+        {#if canRenderNestedEvents}
+          <RepostContent {event} {profiles} {profileLabel} {depth} {maxDepth} {loadResources} />
+        {:else}
+          <div class="depth-limit" data-feed-inline-depth-limit>Nested note limit reached.</div>
+        {/if}
+      {:else if addressablePreview}
+        {#if title}<strong class="body" data-feed-embed-title>{title}</strong>{/if}
+        {#if summary}<span class="body" data-feed-embed-summary>{summary}</span>{/if}
+        {#if event.kind === 30023 && event.content}
+          <ExpandableNoteContent content={event.content} emojiTags={event.tags} {profileLabel} {loadResources} />
+        {:else if !title && !summary}
+          <span class="body muted">No preview available.</span>
+        {/if}
       {:else if isFeedRenderableEvent(event)}
         <ExpandableNoteContent content={event.content} emojiTags={event.tags} {profileLabel} {loadResources} />
         {#if canRenderNestedEvents}
@@ -229,6 +267,8 @@
     display: grid;
     gap: 4px;
     width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
     max-width: 100%;
     padding: 8px 10px;
     border: 1px solid var(--hg-border, #303030);

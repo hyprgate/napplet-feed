@@ -7,6 +7,7 @@ import {
   type NostrEvent,
 } from '@hyprgate/types';
 import {
+  invokeNappletIntent,
   createNoteViewerOpenIntentRequest,
   createNoteViewerOpenPayload,
   createProfileIntentRequest,
@@ -40,8 +41,8 @@ export interface FeedComposeOpenPayload {
 }
 
 export type FeedIntentDispatchResult =
-  | { handled: true; result: IntentResult }
-  | { handled: false; error: string };
+  | { accepted: true; result: IntentResult }
+  | { accepted: false; error: string };
 
 export function createFeedNoteOpenPayload(
   event: NostrEvent,
@@ -100,20 +101,18 @@ export function createFeedComposerIntentRequest(
   return createIntentRequest({ archetype: 'composer', ...options, payload });
 }
 
-/** Invoke a request only when the public result preserves request identity and is handled. */
+/** Invoke a request only when the public result preserves request identity and accepts delivery. */
 export async function invokeFeedIntent(request: IntentRequest): Promise<FeedIntentDispatchResult> {
   try {
-    const result = parseIntentResult(await intent.invoke(request));
-    const action = request.action ?? 'open';
-    if (!result || result.archetype !== request.archetype || result.action !== action) {
-      return { handled: false, error: 'The intent returned an invalid result.' };
+    const result = parseIntentResult(await invokeNappletIntent(request));
+    if (!result) return { accepted: false, error: 'The intent returned an invalid result.' };
+    if (!result.ok) return { accepted: false, error: result.error };
+    if (result.archetype !== request.archetype || result.action !== request.action || result.convention !== request.convention) {
+      return { accepted: false, error: 'The intent returned an invalid result.' };
     }
-    if (!result.ok || !result.handled) {
-      return { handled: false, error: result.error ?? `No ${request.archetype} handler is available.` };
-    }
-    return { handled: true, result };
+    return { accepted: true, result };
   } catch (error) {
-    return { handled: false, error: error instanceof Error ? error.message : 'The intent could not be dispatched.' };
+    return { accepted: false, error: error instanceof Error ? error.message : 'The intent could not be dispatched.' };
   }
 }
 

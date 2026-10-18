@@ -9,6 +9,7 @@
   import { subscribeProfileMetadata, type ProfileContent } from '../lib/profile-metadata';
   import { FEED_PROFILE_HYDRATION_CONTEXT } from '../lib/profile-hydration-context';
   import { collectFeedProfilePubkeys } from '../lib/rendering-fallbacks';
+  import { snapshotFeedTimeline } from '../lib/feed-state-synchronizer';
   import {
     getViewMode as loadSharedViewMode,
     setViewMode as persistSharedViewMode,
@@ -50,6 +51,7 @@
   // immediately copies fields into these $state variables, triggering Svelte
   // reactivity — the same pattern used by profile-store / profile App.svelte.
   let timeline = $state<NostrEvent[]>([]);
+  let lastStoreTimeline: NostrEvent[] | null = null;
   let pendingCount = $state(0);
   let engagementVersion = $state(0);
   let loading = $state(false);
@@ -66,13 +68,12 @@
 
   function syncState(): void {
     const s = store.state;
-    const nextTimeline = [...s.timeline];
-    // The store mutates state.timeline in place (splice) and notifies after
-    // every streamed event. Snapshot into a fresh array so Svelte's referential
-    // equality check sees a change and re-renders incrementally as notes arrive,
-    // instead of only repainting when some other field (e.g. loading at EOSE)
-    // changes — which made the feed feel like it waited for completion.
-    timeline = nextTimeline;
+    const timelineSnapshot = snapshotFeedTimeline(s.timeline, lastStoreTimeline);
+    lastStoreTimeline = timelineSnapshot.sourceTimeline;
+    if (timelineSnapshot.visibleTimeline !== null) {
+      timeline = timelineSnapshot.visibleTimeline;
+      loadMissingProfiles(timelineSnapshot.visibleTimeline);
+    }
     pendingCount = s.pendingNew.length;
     engagementVersion = s.engagementVersion;
     loading = s.loading;
@@ -81,7 +82,6 @@
     viewMode = s.viewMode;
     showReplies = s.showReplies;
     detailedReactions = s.detailedReactions;
-    loadMissingProfiles(nextTimeline);
   }
 
   // Create feed store with syncState wired as the onUpdate callback
@@ -231,9 +231,8 @@
     if (pubkey != null) store.init(pubkey);
   }
 
-  // React to a payload that arrives AFTER the initial restore (the Plan 01
-  // controller flushes feed:open once this window signals feed:ready —
-  // Pitfall 2). Guarded by `initialized` + an applied-payload content check so
+  // React to an intent payload that arrives after the initial restore.
+  // Guarded by `initialized` and an applied-payload content check so
   // streamed store updates and the initial mount do not re-trigger an apply.
   $effect(() => {
     const next = payload;

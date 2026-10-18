@@ -18,12 +18,10 @@ import {
   invokeFeedIntent,
 } from './feed-actions';
 import { rememberEventRelayHints } from './event-relay-hints';
-import { intent, outbox, relay } from '@napplet/sdk';
+import { intentInvoke, outbox, relay } from '@napplet/sdk';
 
 vi.mock('@napplet/sdk', () => ({
-  intent: {
-    invoke: vi.fn(),
-  },
+  intentInvoke: vi.fn(),
   relay: {
     publish: vi.fn().mockResolvedValue({ id: 'reaction' }),
   },
@@ -74,56 +72,62 @@ describe('feed actions', () => {
   it('builds archetype-led note, profile, and composer requests with explicit new-window behavior only when requested', () => {
     expect(createFeedNoteIntentRequest(EVENT)).toEqual({
       archetype: 'note',
+      action: 'open',
+      convention: 'napplet:note/open',
       behavior: { focus: true },
       payload: createFeedNoteOpenPayload(EVENT),
     });
-    expect(createFeedNoteIntentRequest(EVENT, { behavior: { newWindow: true } })).toMatchObject({
+    expect(createFeedNoteIntentRequest(EVENT, { behavior: { reuse: false } })).toMatchObject({
       archetype: 'note',
-      behavior: { focus: true, newWindow: true },
+      action: 'open',
+      convention: 'napplet:note/open',
+      behavior: { focus: true, reuse: false },
     });
     expect(createFeedProfileIntentRequest(EVENT.pubkey)).toEqual({
       archetype: 'profile',
+      action: 'open',
+      convention: 'napplet:profile/open',
       payload: { pubkey: EVENT.pubkey },
     });
-    expect(createFeedProfileIntentRequest(EVENT.pubkey, { behavior: { newWindow: true } })).toMatchObject({
+    expect(createFeedProfileIntentRequest(EVENT.pubkey, { behavior: { reuse: false } })).toMatchObject({
       archetype: 'profile',
-      behavior: { newWindow: true },
+      behavior: { reuse: false },
     });
     expect(createFeedComposerIntentRequest({ source: { napplet: 'feed' } })).toEqual({
       archetype: 'composer',
+      action: 'open',
+      convention: 'napplet:composer/open',
       payload: { source: { napplet: 'feed' } },
     });
   });
 
-  it('accepts only handled results with the canonical request identity', async () => {
+  it('accepts only accepted-delivery results with the canonical request identity', async () => {
     const request = createFeedNoteIntentRequest(EVENT)!;
-    vi.mocked(intent.invoke).mockResolvedValueOnce({
+    vi.mocked(intentInvoke).mockResolvedValueOnce({
       ok: true,
       archetype: 'note',
       action: 'open',
-      handled: true,
+      convention: 'napplet:note/open',
       handler: 'note-viewer',
-      windowId: 'note-window',
     });
 
     await expect(invokeFeedIntent(request)).resolves.toEqual({
-      handled: true,
-      result: expect.objectContaining({ archetype: 'note', action: 'open', windowId: 'note-window' }),
+      accepted: true,
+      result: expect.objectContaining({ archetype: 'note', action: 'open', convention: 'napplet:note/open', handler: 'note-viewer' }),
     });
-    expect(intent.invoke).toHaveBeenCalledWith(request);
+    expect(intentInvoke).toHaveBeenCalledWith('napplet:note/open', { payload: request.payload, behavior: request.behavior });
   });
 
-  it('keeps an unhandled canonical result on the existing failure branch', async () => {
+  it('keeps a pre-acceptance failure on the existing failure branch', async () => {
     const request = createFeedNoteIntentRequest(EVENT)!;
-    vi.mocked(intent.invoke).mockResolvedValueOnce({
+    vi.mocked(intentInvoke).mockResolvedValueOnce({
       ok: false,
       archetype: 'note',
       action: 'open',
-      handled: false,
       error: 'no note handler',
     });
 
-    await expect(invokeFeedIntent(request)).resolves.toEqual({ handled: false, error: 'no note handler' });
+    await expect(invokeFeedIntent(request)).resolves.toEqual({ accepted: false, error: 'no note handler' });
   });
 
   it('creates relay-hinted Note Viewer open payloads when the event has known relays', () => {
