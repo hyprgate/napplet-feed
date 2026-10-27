@@ -24,7 +24,7 @@ export default defineConfig({
     }),
   ],
   resolve: {
-    dedupe: ['svelte'],
+    dedupe: ['svelte', 'nostr-tools'],
   },
   server: {
     port: 5174,

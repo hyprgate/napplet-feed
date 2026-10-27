@@ -84,6 +84,18 @@ function definition(): ControlCommandDefinition {
 }
 
 describe('literal command outcome constraints', () => {
+  it.each(['operation.summary', 'help'] as const)('rejects a name-only or empty %s at declaration compilation', (path) => {
+    for (const copy of ['test configure', 'TEST.CONFIGURE.', ' Test   Configure! ', 'configure-test', '   ']) {
+      const source = definition();
+      source.aliases = [['configure-test']];
+      if (path === 'help') source.help = copy;
+      else source.operation.summary = copy;
+      expect(validateControlCommandDefinition(source)).toContainEqual(expect.objectContaining({ path }));
+      expect(() => compileControlCommandDefinition(source)).toThrow('Invalid control command definition');
+    }
+    expect(validateControlCommandDefinition(definition())).toEqual([]);
+  });
+
   it('derives bounded non-sensitive recovery from the executable schema only', () => {
     const schema: ControlValueSchema = {
       type: 'object',
