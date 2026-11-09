@@ -14,8 +14,9 @@
   import { createFeedResourceVisibilityTracker } from '../lib/feed-resource-visibility';
   import { attachScrollKeyListener } from '../lib/keyboard-scroll';
   import type { ProfileContent } from '../lib/profile-metadata';
-  import { previewContent, replyContextForEvent, shouldTruncateContent, terminalEngagementLabel } from '../lib/note-presentation';
+  import { labelTerminalMentions, previewContent, replyContextForEvent, replyTargetPubkey, shouldTruncateContent, terminalEngagementLabel, tightenImageSpacing } from '../lib/note-presentation';
   import { terminalEventContent } from '../lib/rendering-fallbacks';
+  import FeedListFooter from './FeedListFooter.svelte';
   import ReplyContextLink from './ReplyContextLink.svelte';
   import ReactionContent from './ReactionContent.svelte';
   import { createFeedProfileIntentRequest, invokeFeedIntent } from '../lib/feed-actions';
@@ -30,7 +31,7 @@
     onVisibleEventsChange?: (ids: string[]) => void;
   }
 
-  let { events, profiles, engagement, canLoadMore, onLoadMore, onVisibleEventsChange }: Props = $props();
+  let { events, profiles, engagement, loading, canLoadMore, onLoadMore, onVisibleEventsChange }: Props = $props();
 
   function shortenPubkey(pubkey: string): string {
     try {
@@ -62,7 +63,10 @@
   }
 
   function eventContent(event: NostrEvent): string {
-    const content = terminalEventContent(event);
+    const content = labelTerminalMentions(
+      tightenImageSpacing(terminalEventContent(event)),
+      (pubkey) => getAuthorName(pubkey, profiles.get(pubkey)),
+    );
     return terminalContent(content);
   }
 
@@ -148,6 +152,8 @@
     {@const profile = profiles.get(event.pubkey)}
     {@const counts = engagement.get(event.id)}
     {@const replyContext = replyContextForEvent(event)}
+    {@const replyTarget = replyContext ? replyTargetPubkey(event, replyContext) : null}
+    {@const engagementLabel = terminalEngagementLabel(counts)}
     {@const client = clientTagValue(event)}
     <div
       class="px-2 py-0.5 hover:bg-bg-surface leading-tight text-sm whitespace-pre-wrap break-words"
@@ -165,19 +171,10 @@
         data-feed-author-pubkey={event.pubkey}
         data-feed-author-label={getAuthorName(event.pubkey, profile)}
         onclick={() => openProfile(event.pubkey)}
-      >&lt;{getAuthorName(event.pubkey, profile)}&gt;</button>
-      {#if client}<span class="opacity-70"> (via {client})</span>{/if}
-      {#if replyContext}
-        <span> [{replyContext.label}: <ReplyContextLink reference={replyContext.parent} />{#if replyContext.root} / root <ReplyContextLink reference={replyContext.root} />{/if}]</span>
-      {/if}
-      {#if event.kind === KIND_REACTION}
-        <ReactionContent {event} {profiles} compact loadResources={resourceEventIds.has(event.id)} />
-      {:else}
-        <span> [{terminalEngagementLabel(counts)}]</span>
-        <span> {eventContent(event)}</span>
-      {/if}
+      >&lt;{getAuthorName(event.pubkey, profile)}&gt;</button>{#if client}<span class="opacity-70">{' '}(via {client})</span>{/if}{#if replyContext}<span>{' '}[reply to <ReplyContextLink reference={replyContext.parent} text={replyTarget ? getAuthorName(replyTarget, profiles.get(replyTarget)) : 'this note'} />{#if replyContext.root} in <ReplyContextLink reference={replyContext.root} text="thread" />{/if}]</span>{/if}{#if event.kind === KIND_REACTION}<ReactionContent {event} {profiles} compact loadResources={resourceEventIds.has(event.id)} />{:else}{#if engagementLabel}<span>{' '}[{engagementLabel}]</span>{/if}<span>{' '}{eventContent(event)}</span>{/if}
     </div>
   {/each}
+  <FeedListFooter {loading} {canLoadMore} />
   <div bind:this={sentinel} class="h-4"></div>
 </div>
 

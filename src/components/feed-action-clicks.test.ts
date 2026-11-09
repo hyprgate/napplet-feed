@@ -11,6 +11,7 @@ import ReplyContextLink from './ReplyContextLink.svelte';
 import FeedNoteContent from './NoteContent.svelte';
 import NoteActions from './NoteActions.svelte';
 import NoteEntry from './NoteEntry.svelte';
+import EngagementPills from './EngagementPills.svelte';
 
 vi.mock('@napplet/sdk', () => ({
   intentInvoke: (...args: Parameters<typeof intent.invoke>) => intent.invoke(...args),
@@ -32,6 +33,7 @@ vi.mock('@napplet/sdk', () => ({
   },
   outbox: {
     getEvent: vi.fn(),
+    publish: vi.fn().mockResolvedValue({ status: 'published', event: { id: 'reaction' } }),
   },
 }));
 
@@ -408,6 +410,79 @@ describe('feed action click wiring', () => {
         },
       },
     });
+  });
+
+  it('closes the reaction menu on Escape and returns focus to React', async () => {
+    mount(NoteActions, {
+      target: document.body,
+      props: { event: EVENT, reactionOptions: [] },
+    });
+    const trigger = Array.from(document.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === 'React');
+    trigger?.click();
+    await tick();
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await tick();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('closes the reaction menu on a pointer press outside it', async () => {
+    mount(NoteActions, {
+      target: document.body,
+      props: { event: EVENT, reactionOptions: [] },
+    });
+    Array.from(document.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === 'React')?.click();
+    await tick();
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await tick();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('sends a custom reaction from Enter and from the Send button, without a form', async () => {
+    mount(NoteActions, {
+      target: document.body,
+      props: { event: EVENT, reactionOptions: [] },
+    });
+    const button = (label: string) => Array.from(document.querySelectorAll('button'))
+      .find((candidate) => candidate.textContent?.trim() === label);
+    for (const send of ['enter', 'click'] as const) {
+      button('React')?.click();
+      await tick();
+      expect(document.querySelector('.reaction-menu form')).toBeNull();
+      const input = document.querySelector<HTMLInputElement>('input[aria-label="Custom reaction"]')!;
+      input.value = '🌊';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await tick();
+      if (send === 'enter') input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      else button('Send')?.click();
+      await vi.waitFor(() => expect(document.querySelector('.reaction-menu')).toBeNull());
+    }
+    expect(vi.mocked(outbox.publish).mock.calls.length).toBe(2);
+    expect(vi.mocked(outbox.publish).mock.calls[1]?.[0]).toMatchObject({ kind: 7, content: '🌊' });
+  });
+
+  it('sends an existing reaction from the keyboard, not only by holding', async () => {
+    mount(EngagementPills, {
+      target: document.body,
+      props: {
+        event: EVENT,
+        engagement: { reactions: 2, reactionGroups: [{ content: '🌊', count: 2 }], comments: 0, zaps: 0, zapMillisats: 0 },
+      },
+    });
+    const pill = document.querySelector<HTMLButtonElement>('button.pill');
+    expect(pill?.getAttribute('aria-label')).toBe('2 🌊 reactions, send one too');
+    pill?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+    await vi.waitFor(() => expect(outbox.publish).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(outbox.publish).mock.calls[0]?.[0]).toMatchObject({ kind: 7, content: '🌊' });
+
+    // A mouse click is detail >= 1: pressing and holding stays the pointer gesture.
+    pill?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    await tick();
+    expect(outbox.publish).toHaveBeenCalledTimes(1);
   });
 
   it('shows a dispatch failure when the canonical note request is unhandled', async () => {

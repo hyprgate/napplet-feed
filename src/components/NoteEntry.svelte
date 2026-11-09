@@ -8,7 +8,7 @@
   import type { EngagementCounts } from '../lib/feed-store';
   import type { EmojiOption } from '../lib/emoji-sets';
   import type { ProfileContent } from '../lib/profile-metadata';
-  import { replyContextForEvent } from '../lib/note-presentation';
+  import { replyContextForEvent, replyTargetPubkey } from '../lib/note-presentation';
   import EngagementPills from './EngagementPills.svelte';
   import FeedEventContent from './FeedEventContent.svelte';
   import ReplyContextLink from './ReplyContextLink.svelte';
@@ -57,6 +57,7 @@
   let relativeTime = $derived.by(() => format(event.created_at * 1000));
   let clientName = $derived(clientTagValue(event));
   let replyContext = $derived(replyContextForEvent(event));
+  let replyTarget = $derived(replyContext ? replyTargetPubkey(event, replyContext) : null);
   let hovered = $state(false);
 
   function profileLabel(pubkey: string): string {
@@ -69,6 +70,8 @@
   class="flex gap-2 p-2 hover:bg-bg-surface transition-colors"
   onpointerenter={() => (hovered = true)}
   onpointerleave={() => (hovered = false)}
+  onfocusin={() => (hovered = true)}
+  onfocusout={() => (hovered = false)}
 >
   <!-- Avatar -->
   <button
@@ -114,9 +117,9 @@
 
     {#if replyContext}
       <div class="reply-context" aria-label="Reply context">
-        <div>replying to <ReplyContextLink reference={replyContext.parent} /></div>
+        <div>Replying to <ReplyContextLink reference={replyContext.parent} text={replyTarget ? `${profileLabel(replyTarget)}'s note` : 'this note'} /></div>
         {#if replyContext.root}
-          <div>root <ReplyContextLink reference={replyContext.root} /></div>
+          <div>In <ReplyContextLink reference={replyContext.root} text="this thread" /></div>
         {/if}
       </div>
     {/if}

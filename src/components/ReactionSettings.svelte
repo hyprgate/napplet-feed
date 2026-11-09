@@ -9,6 +9,26 @@
 
   let { state: emojiState, store, version }: Props = $props();
   let open = $state(false);
+  let root: HTMLDivElement | undefined = $state(undefined);
+  let trigger: HTMLButtonElement | undefined = $state(undefined);
+
+  $effect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent): void => {
+      if (!root?.contains(event.target as Node)) open = false;
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      open = false;
+      trigger?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  });
 
   // The button shows whichever palette is active: the built-in default, the
   // user's emoji list (kind 10030), or a named emoji set (kind 30030).
@@ -26,17 +46,18 @@
   }
 </script>
 
-<div class="reaction-settings" data-version={version}>
+<div class="reaction-settings" data-version={version} bind:this={root}>
   <button
     type="button"
     class="toolbar-button"
+    bind:this={trigger}
     aria-expanded={open}
+    aria-label="Reaction palette: {activeLabel}"
     title="Choose reaction palette"
     onclick={() => (open = !open)}
   >
-    <span class="star">★</span>
+    <span class="star" aria-hidden="true">★</span>
     <span class="label">{activeLabel}</span>
-    <span class="count">{emojiState.options.length}</span>
   </button>
 
   {#if open}
@@ -94,12 +115,12 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-height: 24px;
-    max-width: 180px;
+    min-height: 26px;
+    max-width: 140px;
     padding: 0 8px;
     border: 1px solid var(--hg-border, #303030);
     border-radius: 4px;
-    background: var(--hg-surface, #101010);
+    background: transparent;
     color: var(--hg-text-muted, #b8b1a4);
     cursor: pointer;
     font: inherit;

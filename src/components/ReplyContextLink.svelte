@@ -7,9 +7,11 @@
 
   interface Props {
     reference: ReplyContextReferenceDisplay;
+    /** Readable link text. The bech32 entity stays available as the tooltip. */
+    text?: string;
   }
 
-  let { reference }: Props = $props();
+  let { reference, text }: Props = $props();
 
   async function openReference(): Promise<void> {
     const payload = createReplyReferenceOpenPayload(reference);
@@ -20,10 +22,10 @@
 
 {#if reference.target}
   <button type="button" class="reply-context-link" title={reference.title} onclick={openReference}>
-    {reference.label}
+    {text ?? reference.label}
   </button>
 {:else}
-  <span class="reply-context-link muted" title={reference.title}>{reference.label}</span>
+  <span class="reply-context-link muted" title={reference.title}>{text ?? reference.label}</span>
 {/if}
 
 <style>

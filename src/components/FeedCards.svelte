@@ -17,9 +17,10 @@
   import { createEngagementVisibilityTracker } from '../lib/feed-visible-targets';
   import { attachScrollKeyListener } from '../lib/keyboard-scroll';
   import type { ProfileContent } from '../lib/profile-metadata';
-  import { replyContextForEvent } from '../lib/note-presentation';
+  import { replyContextForEvent, replyTargetPubkey } from '../lib/note-presentation';
   import EngagementPills from './EngagementPills.svelte';
   import FeedEventContent from './FeedEventContent.svelte';
+  import FeedListFooter from './FeedListFooter.svelte';
   import ReplyContextLink from './ReplyContextLink.svelte';
 
   interface Props {
@@ -38,6 +39,7 @@
     profiles,
     engagement,
     reactionOptions,
+    loading,
     canLoadMore,
     onLoadMore,
     onVisibleEventsChange,
@@ -151,6 +153,7 @@
     {@const profile = profiles.get(event.pubkey)}
     {@const counts = engagement.get(event.id)}
     {@const replyContext = replyContextForEvent(event)}
+    {@const replyTarget = replyContext ? replyTargetPubkey(event, replyContext) : null}
     <div
       class="border border-border-dim rounded p-3 mb-2 bg-bg-surface hover:bg-bg-overlay transition-colors"
       use:trackEngagementVisibility={event.id}
@@ -159,6 +162,8 @@
       data-feed-resources-enabled={resourceEventIds.has(event.id)}
       onpointerenter={() => (hoveredCardId = event.id)}
       onpointerleave={() => { if (hoveredCardId === event.id) hoveredCardId = null; }}
+      onfocusin={() => (hoveredCardId = event.id)}
+      onfocusout={() => { if (hoveredCardId === event.id) hoveredCardId = null; }}
     >
       <!-- Author row -->
       <div class="flex items-center gap-3 mb-2">
@@ -166,7 +171,7 @@
           type="button"
           class="relative w-12 h-12 rounded-full overflow-hidden flex-shrink-0 bg-bg-base border border-border-dim flex items-center justify-center cursor-pointer"
           onclick={() => openProfile(event.pubkey)}
-          aria-label="Open profile"
+          aria-label="Open profile for {getAuthorName(event.pubkey, profile)}"
         >
           <span class="text-text-muted text-sm font-mono">
             {(profile?.name ?? event.pubkey).slice(0, 2).toUpperCase()}
@@ -205,9 +210,9 @@
       </div>
       {#if replyContext}
         <div class="reply-context" aria-label="Reply context">
-          <div>replying to <ReplyContextLink reference={replyContext.parent} /></div>
+          <div>Replying to <ReplyContextLink reference={replyContext.parent} text={replyTarget ? `${profileLabel(replyTarget)}'s note` : 'this note'} /></div>
           {#if replyContext.root}
-            <div>root <ReplyContextLink reference={replyContext.root} /></div>
+            <div>In <ReplyContextLink reference={replyContext.root} text="this thread" /></div>
           {/if}
         </div>
       {/if}
@@ -217,6 +222,7 @@
       </div>
     </div>
   {/each}
+  <FeedListFooter {loading} {canLoadMore} />
   <div bind:this={sentinel} class="h-4"></div>
 </div>
 

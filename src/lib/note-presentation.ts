@@ -50,13 +50,49 @@ export function countLabel(count: number, singular: string, plural = `${singular
 
 export function terminalEngagementLabel(counts: EngagementCounts | undefined): string {
   const value = counts ?? { reactions: 0, comments: 0, zaps: 0, zapMillisats: 0 };
-  const reactionLabel = value.reactionGroups && value.reactionGroups.length > 0
-    ? value.reactionGroups.map((group) => `${group.content} ${group.count}`).join(' ')
-    : `${value.reactions} react`;
-  const zapLabel = value.zaps > 0
-    ? `${value.zaps} zap ${formatMillisatsAsSats(value.zapMillisats ?? 0)}`
-    : `${value.zaps} zap`;
-  return `${reactionLabel} / ${value.comments} reply / ${zapLabel}`;
+  const parts: string[] = [];
+  if (value.reactionGroups && value.reactionGroups.length > 0) {
+    parts.push(value.reactionGroups.map((group) => `${group.content} ${group.count}`).join(' '));
+  } else if (value.reactions > 0) {
+    parts.push(`${value.reactions} react`);
+  }
+  if (value.comments > 0) parts.push(`${value.comments} reply`);
+  if (value.zaps > 0) parts.push(`${value.zaps} zap ${formatMillisatsAsSats(value.zapMillisats ?? 0)}`);
+  return parts.join(' / ');
+}
+
+/** Terminal rows are plain text, so mentions need their label written in. */
+export function labelTerminalMentions(content: string, profileLabel: (pubkey: string) => string): string {
+  return content.replace(/nostr:(npub1[023456789acdefghjklmnpqrstuvwxyz]{58}|nprofile1[023456789acdefghjklmnpqrstuvwxyz]+)/g, (source, entity: string) => {
+    try {
+      const decoded = nip19.decode(entity);
+      if (decoded.type === 'npub') return `@${profileLabel(decoded.data)}`;
+      if (decoded.type === 'nprofile') return `@${profileLabel(decoded.data.pubkey)}`;
+    } catch {
+      // Malformed entities stay as written.
+    }
+    return source;
+  });
+}
+
+const STANDALONE_IMAGE_LINE = /^\s*https?:\/\/\S+\.(?:png|jpe?g|gif|webp|avif)(?:[?#]\S*)?\s*$/i;
+
+/**
+ * Images render as blocks with their own margin, so the blank lines people leave
+ * around an image URL only add a gap under the text. Other whitespace is untouched.
+ */
+export function tightenImageSpacing(content: string): string {
+  const lines = content.split(/\r\n|\r|\n/);
+  const kept = lines.filter((line, index) => {
+    if (line.trim() !== '') return true;
+    const isBlank = (value: string | undefined) => value !== undefined && value.trim() === '';
+    let before = index - 1;
+    while (isBlank(lines[before])) before -= 1;
+    let after = index + 1;
+    while (isBlank(lines[after])) after += 1;
+    return !STANDALONE_IMAGE_LINE.test(lines[before] ?? '') && !STANDALONE_IMAGE_LINE.test(lines[after] ?? '');
+  });
+  return kept.join('\n').replace(/\s+$/, '');
 }
 
 export interface ReplyContextDisplay {
@@ -83,7 +119,7 @@ export function replyContextForEvent(event: Pick<NostrEvent, 'kind' | 'tags'>): 
     const root = eventReferenceDisplay(reply.root);
     return {
       kind: 'kind1',
-      label: reply.source === 'marked' ? 'kind 1 reply' : 'kind 1 reply (legacy tags)',
+      label: 'Reply',
       parent,
       root: referenceKey(root.reference) !== referenceKey(parent.reference) ? root : null,
     };
@@ -93,10 +129,24 @@ export function replyContextForEvent(event: Pick<NostrEvent, 'kind' | 'tags'>): 
   const root = targetReferenceDisplay(reply.root, reply.rootKind, reply.rootPubkey);
   return {
     kind: 'nip22',
-    label: 'kind 1111 reply',
+    label: 'Comment',
     parent,
     root: referenceKey(root.reference) !== referenceKey(parent.reference) ? root : null,
   };
+}
+
+/**
+ * Who the reply answers: the author hint on the parent reference, else the only
+ * `p` tag. Several `p` tags don't say which one wrote the parent, so no guess.
+ */
+export function replyTargetPubkey(
+  event: Pick<NostrEvent, 'tags'>,
+  context: ReplyContextDisplay,
+): string | null {
+  const hinted = context.parent.target?.pubkey;
+  if (hinted) return hinted;
+  const mentioned = new Set(event.tags.filter((tag) => tag[0] === 'p' && tag[1]).map((tag) => tag[1]));
+  return mentioned.size === 1 ? [...mentioned][0] ?? null : null;
 }
 
 export function isReplyEvent(event: Pick<NostrEvent, 'kind' | 'tags'>): boolean {

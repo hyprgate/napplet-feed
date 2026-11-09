@@ -3,10 +3,13 @@ import * as nip19 from 'nostr-tools/nip19';
 import {
   createReplyReferenceOpenPayload,
   countLabel,
+  labelTerminalMentions,
   previewContent,
   replyContextForEvent,
+  replyTargetPubkey,
   shouldTruncateContent,
   terminalEngagementLabel,
+  tightenImageSpacing,
 } from './note-presentation';
 
 const ROOT_ID = '0'.repeat(63) + '1';
@@ -43,7 +46,8 @@ describe('note presentation helpers', () => {
       zaps: 1,
       zapMillisats: 1500,
     })).toBe('+ 2 - 1 / 2 reply / 1 zap 1.5 sats');
-    expect(terminalEngagementLabel(undefined)).toBe('0 react / 0 reply / 0 zap');
+    expect(terminalEngagementLabel(undefined)).toBe('');
+    expect(terminalEngagementLabel({ reactions: 0, comments: 2, zaps: 0 })).toBe('2 reply');
   });
 
   it('renders relay-hinted reply references as note-viewer nevents', () => {
@@ -86,5 +90,42 @@ describe('note presentation helpers', () => {
     expect(context!.parent.title).toBe(nip19.noteEncode(PARENT_ID));
     expect(context!.parent.label).toMatch(/^note1/);
     expect(context!.parent.relays).toEqual([]);
+  });
+
+  it('names reply kinds in plain language', () => {
+    expect(replyContextForEvent({ kind: 1, tags: [['e', ROOT_ID, '', 'root']] })?.label).toBe('Reply');
+    expect(replyContextForEvent({
+      kind: 1111,
+      tags: [['E', ROOT_ID, '', PUBKEY], ['K', '1'], ['P', PUBKEY], ['e', PARENT_ID, '', PUBKEY], ['k', '1'], ['p', PUBKEY]],
+    })?.label).toBe('Comment');
+  });
+
+  it('only names a replied-to person when the tags say who it is', () => {
+    const other = 'b'.repeat(64);
+    const single = { kind: 1, tags: [['e', ROOT_ID, '', 'root'], ['p', PUBKEY]] };
+    const several = { kind: 1, tags: [['e', ROOT_ID, '', 'root'], ['p', PUBKEY], ['p', other]] };
+    const hinted = {
+      kind: 1111,
+      tags: [['E', ROOT_ID, '', PUBKEY], ['K', '1'], ['P', PUBKEY], ['e', PARENT_ID, '', other], ['k', '1'], ['p', other]],
+    };
+    expect(replyTargetPubkey(single, replyContextForEvent(single)!)).toBe(PUBKEY);
+    expect(replyTargetPubkey(several, replyContextForEvent(several)!)).toBeNull();
+    expect(replyTargetPubkey(hinted, replyContextForEvent(hinted)!)).toBe(other);
+  });
+
+  it('writes profile labels into plain-text terminal mentions', () => {
+    const npub = nip19.npubEncode(PUBKEY);
+    const nprofile = nip19.nprofileEncode({ pubkey: PUBKEY });
+    const label = () => 'Alice';
+    expect(labelTerminalMentions(`hi nostr:${npub}!`, label)).toBe('hi @Alice!');
+    expect(labelTerminalMentions(`hi nostr:${nprofile}`, label)).toBe('hi @Alice');
+    expect(labelTerminalMentions(`see nostr:${nip19.noteEncode(ROOT_ID)}`, label)).toBe(`see nostr:${nip19.noteEncode(ROOT_ID)}`);
+  });
+
+  it('drops only the blank lines around a standalone image URL', () => {
+    expect(tightenImageSpacing('Look.\n\nhttps://a.example/x.png')).toBe('Look.\nhttps://a.example/x.png');
+    expect(tightenImageSpacing('https://a.example/x.jpg?w=1\n\n\nNext')).toBe('https://a.example/x.jpg?w=1\nNext');
+    expect(tightenImageSpacing('One.\n\nTwo.')).toBe('One.\n\nTwo.');
+    expect(tightenImageSpacing('See https://a.example/x.png\n\nTwo.')).toBe('See https://a.example/x.png\n\nTwo.');
   });
 });

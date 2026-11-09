@@ -4,7 +4,7 @@
 > Do not push commits to this standalone napplet repository; direct changes are overwritten by Hyprgate's mirror workflow.
 <!-- HYPRGATE NAPPLET MIRROR NOTICE:END -->
 
-# napplet-feed
+# Feed
 
 [![CI](https://github.com/hyprgate/napplet-feed/actions/workflows/ci.yml/badge.svg)](https://github.com/hyprgate/napplet-feed/actions/workflows/ci.yml)
 
@@ -43,6 +43,17 @@ The `conformance` script builds the napplet and runs `@napplet/conformance-cli` 
 
 Workspace dependencies resolve in the Hyprgate checkout. The mirror workflow
 rewrites workspace dependency pins for standalone source distribution.
+
+## Toolbar and states
+
+The toolbar groups what the list shows (Replies, NSFW, Reaction details) apart
+from how it's laid out, and each toggle shows when it's on. The list always says
+why it's empty: no follows, a saved feed with no matches, or the NSFW filter
+hiding everything it has loaded. See `src/lib/feed-empty-state.ts`.
+
+Reaction counts can be sent from the keyboard (Enter/Space on a count) as well as
+by press and hold. The reaction menu and the palette popover close on Escape or
+an outside press, and Escape returns focus to the button that opened them.
 
 ## Reaction context
 

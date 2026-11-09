@@ -10,6 +10,7 @@
   import type { EmojiOption } from '../lib/emoji-sets';
   import { createFeedResourceVisibilityTracker } from '../lib/feed-resource-visibility';
   import { createEngagementVisibilityTracker } from '../lib/feed-visible-targets';
+  import FeedListFooter from './FeedListFooter.svelte';
   import NoteEntry from './NoteEntry.svelte';
 
   interface ProfileContent {
@@ -34,6 +35,7 @@
     profiles,
     engagement,
     reactionOptions,
+    loading,
     canLoadMore,
     onLoadMore,
     onVisibleEventsChange,
@@ -126,6 +128,7 @@
       </div>
     {/each}
   </div>
+  <FeedListFooter {loading} {canLoadMore} />
   <!-- Sentinel for infinite scroll -->
   <div bind:this={sentinel} class="h-4"></div>
 </div>

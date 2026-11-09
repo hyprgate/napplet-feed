@@ -5,6 +5,7 @@
     DEFAULT_NOTE_TRUNCATE_LINES,
     previewContent,
     shouldTruncateContent,
+    tightenImageSpacing,
   } from '../lib/note-presentation';
 
   interface Props {
@@ -26,8 +27,9 @@
   }: Props = $props();
 
   let expanded = $state(false);
-  let isTruncated = $derived(shouldTruncateContent(content, maxChars, maxLines));
-  let visibleContent = $derived(expanded || !isTruncated ? content : previewContent(content, maxChars, maxLines));
+  let readable = $derived(tightenImageSpacing(content));
+  let isTruncated = $derived(shouldTruncateContent(readable, maxChars, maxLines));
+  let visibleContent = $derived(expanded || !isTruncated ? readable : previewContent(readable, maxChars, maxLines));
 </script>
 
 <div class="expandable-note-content">
@@ -47,6 +49,16 @@
 <style>
   .expandable-note-content {
     min-width: 0;
+  }
+
+  /* Keep the next note on screen: an image shouldn't fill the whole window. */
+  .expandable-note-content :global(.note-content img.media) {
+    max-width: min(100%, 512px);
+    max-height: 18rem;
+  }
+
+  .expandable-note-content :global(.note-content img.media.resource-pending) {
+    width: min(100%, 512px);
   }
 
   .toggle {

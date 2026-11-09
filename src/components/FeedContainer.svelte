@@ -10,6 +10,7 @@
   import { FEED_PROFILE_HYDRATION_CONTEXT } from '../lib/profile-hydration-context';
   import { collectFeedProfilePubkeys } from '../lib/rendering-fallbacks';
   import { snapshotFeedTimeline } from '../lib/feed-state-synchronizer';
+  import { feedEmptyState } from '../lib/feed-empty-state';
   import {
     getViewMode as loadSharedViewMode,
     setViewMode as persistSharedViewMode,
@@ -65,6 +66,12 @@
   let visibleTimeline = $derived(
     showNsfw ? timeline : timeline.filter((event) => !hasNsfwTag(event)),
   );
+
+  let emptyState = $derived(feedEmptyState({
+    timelineCount: timeline.length,
+    visibleCount: visibleTimeline.length,
+    hasPayload: payload != null,
+  }));
 
   function syncState(): void {
     const s = store.state;
@@ -314,52 +321,28 @@
        #tag / saved feeds) is now chosen from the shell-native FeedChromeBar
        (Phase 89, FEED-03) which drives this window over NAP-INTENT, so the old
        in-napplet Following/Global switcher was removed (D-01/D-02). -->
-  <div class="flex items-center gap-2 px-3 py-2 border-b border-border-dim flex-shrink-0">
-    <!-- Spacer -->
+  <div class="feed-toolbar flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 border-b border-border-dim flex-shrink-0">
+    <div class="toolbar-group" role="group" aria-label="Show in this feed">
+      <span class="toolbar-label" aria-hidden="true">Show</span>
+      {#snippet toggle(label: string, on: boolean, title: string, change: () => void)}
+        <button type="button" class="toolbar-toggle" class:on aria-pressed={on} {title} onclick={change}>
+          <span class="toggle-box" aria-hidden="true"></span>
+          {label}
+        </button>
+      {/snippet}
+      {@render toggle('Replies', showReplies, 'Include replies in this feed', () => setShowReplies(!showReplies))}
+      {@render toggle('NSFW', showNsfw, 'Show notes tagged #nsfw', () => { showNsfw = !showNsfw; })}
+      {@render toggle('Reaction details', detailedReactions, 'Split reaction counts by emoji', () => setDetailedReactions(!detailedReactions))}
+    </div>
+
     <div class="flex-1"></div>
-
-    <button
-      type="button"
-      class="px-2 py-1 text-xs font-mono rounded transition-colors {showReplies ? 'bg-accent-green/20 text-accent-green border border-accent-green/40' : 'text-text-muted border border-border-dim hover:text-text-primary'}"
-      aria-pressed={showReplies}
-      onclick={() => setShowReplies(!showReplies)}
-    >
-      Show replies
-    </button>
-
-    <button
-      type="button"
-      class="px-2 py-1 text-xs font-mono rounded transition-colors {showNsfw ? 'bg-accent-green/20 text-accent-green border border-accent-green/40' : 'text-text-muted border border-border-dim hover:text-text-primary'}"
-      aria-pressed={showNsfw}
-      title="Show #nsfw notes"
-      onclick={() => { showNsfw = !showNsfw; }}
-    >
-      NSFW
-    </button>
 
     <ReactionSettings state={emojiStore.state} store={emojiStore} version={emojiVersion} />
 
-    <button
-      type="button"
-      class="px-2 py-1 text-xs font-mono rounded transition-colors {detailedReactions ? 'bg-accent-green/20 text-accent-green border border-accent-green/40' : 'text-text-muted border border-border-dim hover:text-text-primary'}"
-      aria-pressed={detailedReactions}
-      title="Show reaction kinds"
-      onclick={() => setDetailedReactions(!detailedReactions)}
-    >
-      Detailed reactions
-    </button>
-
     <!-- View mode switcher -->
-    <div class="flex gap-1">
-      <!-- Compact list icon -->
-      <button
-        type="button"
-        class="p-1 rounded transition-colors {viewMode === 'compact' ? 'text-accent-green' : 'text-text-muted hover:text-text-primary'}"
-        onclick={() => setViewMode('compact')}
-        aria-label="Compact list view"
-        title="Compact list"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <div class="view-switch" role="group" aria-label="Layout">
+      <button type="button" class:on={viewMode === 'compact'} aria-pressed={viewMode === 'compact'} onclick={() => setViewMode('compact')} aria-label="Compact list view" title="Compact list">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="8" y1="6" x2="21" y2="6" />
           <line x1="8" y1="12" x2="21" y2="12" />
           <line x1="8" y1="18" x2="21" y2="18" />
@@ -368,30 +351,16 @@
           <line x1="3" y1="18" x2="3.01" y2="18" />
         </svg>
       </button>
-      <!-- Cards icon -->
-      <button
-        type="button"
-        class="p-1 rounded transition-colors {viewMode === 'cards' ? 'text-accent-green' : 'text-text-muted hover:text-text-primary'}"
-        onclick={() => setViewMode('cards')}
-        aria-label="Cards view"
-        title="Cards"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" class:on={viewMode === 'cards'} aria-pressed={viewMode === 'cards'} onclick={() => setViewMode('cards')} aria-label="Cards view" title="Cards">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="3" y="3" width="7" height="7" />
           <rect x="14" y="3" width="7" height="7" />
           <rect x="14" y="14" width="7" height="7" />
           <rect x="3" y="14" width="7" height="7" />
         </svg>
       </button>
-      <!-- Terminal icon -->
-      <button
-        type="button"
-        class="p-1 rounded transition-colors {viewMode === 'terminal' ? 'text-accent-green' : 'text-text-muted hover:text-text-primary'}"
-        onclick={() => setViewMode('terminal')}
-        aria-label="Terminal view"
-        title="Terminal"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" class:on={viewMode === 'terminal'} aria-pressed={viewMode === 'terminal'} onclick={() => setViewMode('terminal')} aria-label="Terminal view" title="Terminal">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="4 17 10 11 4 5" />
           <line x1="12" y1="19" x2="20" y2="19" />
         </svg>
@@ -408,16 +377,30 @@
   <!-- Feed content -->
   <div class="flex-1 overflow-hidden flex flex-col">
     {#if error != null}
-      <div class="p-4 text-accent-red font-mono text-sm">
-        <span class="text-text-muted">error:</span> {error}
+      <div class="feed-message" role="alert">
+        <p class="feed-message-title">Couldn't load this feed</p>
+        <p class="feed-message-detail">{error}</p>
+        <button type="button" class="feed-message-action" onclick={applyActiveSource}>Try again</button>
       </div>
     {:else if loading && timeline.length === 0}
-      <div class="p-4 text-text-muted font-mono text-sm animate-pulse">
-        loading feed...
+      <div class="feed-skeleton" role="status" aria-label="Loading feed" aria-busy="true">
+        {#each [0, 1, 2, 3] as row (row)}
+          <div class="skeleton-row">
+            <span class="skeleton-avatar"></span>
+            <span class="skeleton-lines">
+              <span class="skeleton-line short"></span>
+              <span class="skeleton-line"></span>
+            </span>
+          </div>
+        {/each}
       </div>
-    {:else if timeline.length === 0}
-      <div class="p-4 text-text-muted font-mono text-sm">
-        no notes yet
+    {:else if emptyState}
+      <div class="feed-message" data-feed-empty={emptyState.kind}>
+        <p class="feed-message-title">{emptyState.title}</p>
+        <p class="feed-message-detail">{emptyState.detail}</p>
+        {#if emptyState.kind === 'hidden-nsfw'}
+          <button type="button" class="feed-message-action" onclick={() => { showNsfw = true; }}>Show NSFW notes</button>
+        {/if}
       </div>
     {:else if viewMode === 'compact'}
       <FeedList events={visibleTimeline} {profiles} {engagement} {reactionOptions} {loading} {canLoadMore} onLoadMore={loadMore} onVisibleEventsChange={setEngagementTargetIds} />
@@ -428,3 +411,185 @@
     {/if}
   </div>
 </div>
+
+<style>
+  /* Every feed control shares one keyboard focus ring. */
+  .feed-container :global(button:focus-visible),
+  .feed-container :global(a:focus-visible),
+  .feed-container :global(input:focus-visible) {
+    outline: 2px solid var(--hg-accent-focus, var(--hg-accent-primary, #82d8f7));
+    outline-offset: 1px;
+  }
+
+  .toolbar-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .toolbar-label {
+    margin-right: 2px;
+    color: var(--hg-text-muted, #b8b1a4);
+    font-size: 11px;
+  }
+
+  @media (max-width: 520px) {
+    .toolbar-label {
+      display: none;
+    }
+  }
+
+  .toolbar-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 26px;
+    padding: 0 8px;
+    border: 1px solid var(--hg-border, #303030);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--hg-text-muted, #b8b1a4);
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .toolbar-toggle:hover {
+    color: var(--hg-text-primary, #f2efe7);
+  }
+
+  .toolbar-toggle.on {
+    border-color: var(--hg-accent-primary, #82d8f7);
+    background: color-mix(in srgb, var(--hg-accent-primary, #82d8f7) 14%, transparent);
+    color: var(--hg-text-primary, #f2efe7);
+  }
+
+  .toggle-box {
+    width: 8px;
+    height: 8px;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+  }
+
+  .toolbar-toggle.on .toggle-box {
+    border-color: var(--hg-accent-primary, #82d8f7);
+    background: var(--hg-accent-primary, #82d8f7);
+  }
+
+  .view-switch {
+    display: inline-flex;
+    overflow: hidden;
+    border: 1px solid var(--hg-border, #303030);
+    border-radius: 4px;
+  }
+
+  .view-switch button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 24px;
+    border: 0;
+    background: transparent;
+    color: var(--hg-text-muted, #b8b1a4);
+    cursor: pointer;
+  }
+
+  .view-switch button:hover {
+    color: var(--hg-text-primary, #f2efe7);
+  }
+
+  .view-switch button.on {
+    background: color-mix(in srgb, var(--hg-accent-primary, #82d8f7) 22%, transparent);
+    color: var(--hg-text-primary, #f2efe7);
+  }
+
+  .view-switch button:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .feed-message {
+    display: grid;
+    justify-items: center;
+    gap: 8px;
+    max-width: 44ch;
+    margin: 12vh auto 0;
+    padding: 16px;
+    text-align: center;
+  }
+
+  .feed-message-title {
+    margin: 0;
+    color: var(--hg-text-primary, #f2efe7);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .feed-message-detail {
+    margin: 0;
+    color: var(--hg-text-muted, #b8b1a4);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .feed-message-action {
+    margin-top: 4px;
+    padding: 5px 10px;
+    border: 1px solid var(--hg-accent-primary, #82d8f7);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--hg-text-primary, #f2efe7);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+  }
+
+  .feed-message-action:hover {
+    background: color-mix(in srgb, var(--hg-accent-primary, #82d8f7) 14%, transparent);
+  }
+
+  .skeleton-row {
+    display: flex;
+    gap: 8px;
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--hg-border-muted, #222);
+  }
+
+  .skeleton-avatar {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--hg-surface, #101010);
+  }
+
+  .skeleton-lines {
+    display: grid;
+    flex: 1;
+    align-content: center;
+    gap: 7px;
+  }
+
+  .skeleton-line {
+    height: 9px;
+    max-width: 62ch;
+    border-radius: 3px;
+    background: var(--hg-surface, #101010);
+  }
+
+  .skeleton-line.short {
+    max-width: 20ch;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .feed-skeleton {
+      animation: feed-skeleton-pulse 1.4s ease-in-out infinite;
+    }
+  }
+
+  @keyframes feed-skeleton-pulse {
+    50% { opacity: 0.55; }
+  }
+</style>

@@ -26,6 +26,26 @@
   let reactionMenuOpen = $state(false);
   let customReaction = $state('');
   let error = $state<string | null>(null);
+  let picker: HTMLDivElement | undefined = $state(undefined);
+  let reactTrigger: HTMLButtonElement | undefined = $state(undefined);
+
+  $effect(() => {
+    if (!reactionMenuOpen) return;
+    const onPointerDown = (pointer: PointerEvent): void => {
+      if (!picker?.contains(pointer.target as Node)) reactionMenuOpen = false;
+    };
+    const onKeyDown = (key: KeyboardEvent): void => {
+      if (key.key !== 'Escape' || key.defaultPrevented) return;
+      reactionMenuOpen = false;
+      reactTrigger?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  });
 
   async function openReplyComposer(): Promise<void> {
     error = null;
@@ -66,10 +86,24 @@
 </script>
 
 <div class="note-actions">
-  <button type="button" onclick={openNoteViewer}>Open</button>
-  <button type="button" onclick={openReplyComposer}>Reply</button>
-  <div class="reaction-picker">
-    <button type="button" onclick={() => (reactionMenuOpen = !reactionMenuOpen)} disabled={reacting}>
+  <button type="button" onclick={openNoteViewer}>
+    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
+    Open
+  </button>
+  <button type="button" onclick={openReplyComposer}>
+    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H4l2.5-3.5A8 8 0 1 1 21 12z" /></svg>
+    Reply
+  </button>
+  <div class="reaction-picker" bind:this={picker}>
+    <button
+      type="button"
+      bind:this={reactTrigger}
+      aria-haspopup="menu"
+      aria-expanded={reactionMenuOpen}
+      onclick={() => (reactionMenuOpen = !reactionMenuOpen)}
+      disabled={reacting}
+    >
+      <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5s1.3 2 3.5 2 3.5-2 3.5-2M9 9.5h.01M15 9.5h.01" /></svg>
       {reacting ? 'Reacting...' : 'React'}
     </button>
     {#if reactionMenuOpen}
@@ -93,16 +127,22 @@
             onselect={(emoji) => void react(emoji)}
           />
         </div>
-        <form class="custom-reaction" onsubmit={(submitEvent) => { submitEvent.preventDefault(); void reactCustom(); }}>
+        <!-- Not a <form>: submit never fires under sandbox="allow-scripts". -->
+        <div class="custom-reaction">
           <input
             bind:value={customReaction}
             placeholder="emoji or :code:"
             aria-label="Custom reaction"
             maxlength="32"
             disabled={reacting}
+            onkeydown={(key) => {
+              if (key.key !== 'Enter' || key.isComposing) return;
+              key.preventDefault();
+              void reactCustom();
+            }}
           />
-          <button type="submit" disabled={reacting || !customReaction.trim()}>Send</button>
-        </form>
+          <button type="button" disabled={reacting || !customReaction.trim()} onclick={() => void reactCustom()}>Send</button>
+        </div>
       </div>
     {/if}
   </div>
@@ -115,27 +155,47 @@
   .note-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-top: 8px;
+    gap: 2px;
+    margin: 4px 0 0 -6px;
     min-height: 24px;
     flex-wrap: wrap;
   }
 
   button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     height: 24px;
-    padding: 0 8px;
-    border: 1px solid var(--hg-border, #303030);
+    padding: 0 6px;
+    border: 1px solid transparent;
     border-radius: 4px;
-    background: var(--hg-surface, #101010);
+    background: transparent;
     color: var(--hg-text-muted, #b8b1a4);
     cursor: pointer;
     font: inherit;
     font-size: 11px;
   }
 
-  button:hover:not(:disabled) {
-    border-color: var(--hg-accent-cyan, #82d8f7);
+  button svg {
+    width: 13px;
+    height: 13px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  button:hover:not(:disabled),
+  button[aria-expanded='true'] {
+    border-color: var(--hg-border, #303030);
+    background: var(--hg-surface, #101010);
     color: var(--hg-text-primary, #f2efe7);
+  }
+
+  .reaction-menu button {
+    border-color: var(--hg-border, #303030);
+    background: var(--hg-surface, #101010);
   }
 
   button:disabled {

@@ -10,7 +10,7 @@ import {
   type NoteContentBlock,
 } from '@hyprgate/utils';
 import { normalizeRelayHints, relayHintsForEvent } from './event-relay-hints';
-import { previewContent } from './note-presentation';
+import { previewContent, replyContextForEvent, replyTargetPubkey } from './note-presentation';
 import { reactionPresentation, reactionTarget } from './reaction-presentation';
 
 export const KIND_COMMENT = 1111;
@@ -121,6 +121,9 @@ export function collectFeedProfilePubkeys(events: NostrEvent[]): Set<string> {
       }
       return;
     }
+
+    const replyContext = replyContextForEvent(event);
+    if (replyContext) add(replyTargetPubkey(event, replyContext));
 
     for (const block of parseNoteContent(event.content)) {
       if (block.type === 'profile') add(block.value);
