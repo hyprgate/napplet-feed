@@ -35,3 +35,6 @@ export * from './theme-client.js';
 export * from './workspace-journal-protocol.js';
 export * from './zaps.js';
 export * from './napplet-catalog.js';
+export * from './nap-domains.js';
+export * from './napshot-labels.js';
+export * from './napplet-embed.js';

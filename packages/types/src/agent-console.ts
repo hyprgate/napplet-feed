@@ -18,6 +18,14 @@
  * itself (`hyprg connections`, `hyprg login`), which the shell names by id and
  * never sees the secret of. `console.list-connections` asks for the harness's
  * list; `console.connections` answers with descriptors only.
+ *
+ * Projects work the same way: directories the machine's owner exposed with
+ * `hyprg projects`, each with its controls (writes, commands, network).
+ * `console.list-projects` asks for them and `console.projects` answers with
+ * descriptors and how commands are sandboxed. A session names a project by id
+ * in `console.session-start`; the shell never sends a path, and the bridge
+ * refuses an id it does not hold. `desktopWorkspace` is the Hyprgate
+ * workspace the console runs on, so the agent works there.
  */
 
 export const CONSOLE_MESSAGE_MAX_BYTES = 256 * 1024;
@@ -51,14 +59,46 @@ export interface ConsoleHarnessConnection {
 }
 
 export const CONSOLE_MAX_HARNESS_CONNECTIONS = 64;
+export const CONSOLE_MAX_PROJECTS = 128;
+export const CONSOLE_MAX_DESKTOP_WORKSPACE = 99;
+
+export type ConsoleNetworkMode = 'off' | 'local' | 'on';
+
+/** A directory the harness exposes to sessions, and the controls they run under. */
+export interface ConsoleProject {
+  readonly id: string;
+  readonly name: string;
+  /** Shown to the user; the shell never sends it back. */
+  readonly path: string;
+  /** False when the directory is gone. */
+  readonly available: boolean;
+  readonly write: boolean;
+  readonly commands: boolean;
+  readonly network: ConsoleNetworkMode;
+  /** Names of the environment variables passed to commands (never values). */
+  readonly env: readonly string[];
+}
+
+/** How the harness runs commands: whether its OS sandbox enforces the network and write controls. */
+export interface ConsoleSandbox {
+  readonly confines: boolean;
+  readonly detail: string;
+}
 
 export type ConsoleSessionState = 'idle' | 'working' | 'model-error' | 'ended';
 export type ConsolePermissionAnswer = 'allow-once' | 'allow-group' | 'deny';
 
+/** Where a session works: a project the harness holds (or its scratch directory) and the desktop workspace it runs on. */
+export interface ConsoleSessionPlace {
+  readonly project?: string;
+  readonly desktopWorkspace?: number;
+}
+
 export type ConsoleShellMessage =
-  | { readonly v: 1; readonly type: 'console.session-start'; readonly sessionId: string; readonly connection: ConsoleConnection; readonly credential?: string; readonly consentedAt: number }
-  | { readonly v: 1; readonly type: 'console.session-start'; readonly sessionId: string; readonly harnessConnection: string; readonly consentedAt: number }
+  | ({ readonly v: 1; readonly type: 'console.session-start'; readonly sessionId: string; readonly connection: ConsoleConnection; readonly credential?: string; readonly consentedAt: number } & ConsoleSessionPlace)
+  | ({ readonly v: 1; readonly type: 'console.session-start'; readonly sessionId: string; readonly harnessConnection: string; readonly consentedAt: number } & ConsoleSessionPlace)
   | { readonly v: 1; readonly type: 'console.list-connections' }
+  | { readonly v: 1; readonly type: 'console.list-projects' }
   | { readonly v: 1; readonly type: 'console.prompt'; readonly sessionId: string; readonly promptId: string; readonly text: string }
   | { readonly v: 1; readonly type: 'console.cancel'; readonly sessionId: string }
   | { readonly v: 1; readonly type: 'console.permission-response'; readonly sessionId: string; readonly requestId: string; readonly answer: ConsolePermissionAnswer }
@@ -86,16 +126,17 @@ export interface ConsolePartial {
 
 export type ConsoleBridgeMessage =
   | { readonly v: 1; readonly type: 'console.connections'; readonly connections: readonly ConsoleHarnessConnection[] }
+  | { readonly v: 1; readonly type: 'console.projects'; readonly projects: readonly ConsoleProject[]; readonly sandbox: ConsoleSandbox }
   | { readonly v: 1; readonly type: 'console.update'; readonly sessionId: string; readonly events: readonly ConsoleEvent[]; readonly partial?: ConsolePartial }
   | { readonly v: 1; readonly type: 'console.permission-request'; readonly sessionId: string; readonly requestId: string; readonly tool: string; readonly group: string; readonly arguments: Readonly<Record<string, unknown>> }
   | { readonly v: 1; readonly type: 'console.session-state'; readonly sessionId: string; readonly state: ConsoleSessionState; readonly detail?: string; readonly refused?: ConsoleRefusal };
 
-export type ConsoleRefusal = 'not-loopback' | 'no-session' | 'unknown-session' | 'rate-limited' | 'too-large' | 'stale-permission';
+export type ConsoleRefusal = 'not-loopback' | 'no-session' | 'unknown-session' | 'rate-limited' | 'too-large' | 'stale-permission' | 'unknown-project';
 
 export type ConsoleMessage = ConsoleShellMessage | ConsoleBridgeMessage;
 
 const SHELL_TYPES = new Set<string>([
-  'console.session-start', 'console.list-connections', 'console.prompt', 'console.cancel', 'console.permission-response', 'console.attach', 'console.session-end',
+  'console.session-start', 'console.list-connections', 'console.list-projects', 'console.prompt', 'console.cancel', 'console.permission-response', 'console.attach', 'console.session-end',
 ]);
 
 /** True for the messages the shell sends; the bridge acts only on these. */
@@ -110,7 +151,10 @@ const HEADERS = new Set(['authorization-bearer', 'api-key', 'x-api-key', 'x-goog
 const STATES = new Set(['idle', 'working', 'model-error', 'ended']);
 const ANSWERS = new Set(['allow-once', 'allow-group', 'deny']);
 const KINDS = new Set(['user', 'assistant', 'thought', 'plan', 'tool-call', 'tool-result', 'skill', 'state']);
-const REFUSALS = new Set(['not-loopback', 'no-session', 'unknown-session', 'rate-limited', 'too-large', 'stale-permission']);
+const REFUSALS = new Set(['not-loopback', 'no-session', 'unknown-session', 'rate-limited', 'too-large', 'stale-permission', 'unknown-project']);
+const PROJECT_ID = /^[a-z][a-z0-9-]{0,39}$/;
+const NETWORK_MODES = new Set(['off', 'local', 'on']);
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -130,6 +174,25 @@ function parseHarnessConnection(value: unknown): ConsoleHarnessConnection | null
   if (account !== undefined && !short(account, 320)) return null;
   if (typeof isDefault !== 'boolean' || (toolsChecked !== undefined && typeof toolsChecked !== 'boolean')) return null;
   return { id, label, provider, protocol, baseUrl, model, auth, isDefault, ...(account ? { account } : {}), ...(toolsChecked !== undefined ? { toolsChecked } : {}) };
+}
+
+function parseProject(value: unknown): ConsoleProject | null {
+  if (!isRecord(value)) return null;
+  const { id, name, path, available, write, commands, network, env } = value;
+  if (typeof id !== 'string' || !PROJECT_ID.test(id)) return null;
+  if (typeof name !== 'string' || !name || name.length > 80 || typeof path !== 'string' || !path || path.length > 4096) return null;
+  if (typeof available !== 'boolean' || typeof write !== 'boolean' || typeof commands !== 'boolean') return null;
+  if (typeof network !== 'string' || !NETWORK_MODES.has(network)) return null;
+  if (!Array.isArray(env) || env.length > 64 || !env.every((entry) => typeof entry === 'string' && ENV_NAME.test(entry))) return null;
+  return { id, name, path, available, write, commands, network: network as ConsoleNetworkMode, env: env as string[] };
+}
+
+/** The optional place fields of `console.session-start`, or null when one is malformed. */
+function parsePlace(parsed: Record<string, unknown>): ConsoleSessionPlace | null {
+  const { project, desktopWorkspace } = parsed;
+  if (project !== undefined && (typeof project !== 'string' || !PROJECT_ID.test(project))) return null;
+  if (desktopWorkspace !== undefined && (typeof desktopWorkspace !== 'number' || !Number.isInteger(desktopWorkspace) || desktopWorkspace < 1 || desktopWorkspace > CONSOLE_MAX_DESKTOP_WORKSPACE)) return null;
+  return { ...(project !== undefined ? { project } : {}), ...(desktopWorkspace !== undefined ? { desktopWorkspace } : {}) };
 }
 
 function parseConnection(value: unknown): ConsoleConnection | null {
@@ -161,6 +224,15 @@ export function parseConsoleMessage(json: string): ConsoleMessage | null {
   if (!isRecord(parsed) || parsed.v !== 1 || !isConsoleMessageType(parsed.type)) return null;
   // The two messages about the harness's connections belong to no session.
   if (parsed.type === 'console.list-connections') return { v: 1, type: 'console.list-connections' };
+  if (parsed.type === 'console.list-projects') return { v: 1, type: 'console.list-projects' };
+  if (parsed.type === 'console.projects') {
+    if (!Array.isArray(parsed.projects) || parsed.projects.length > CONSOLE_MAX_PROJECTS) return null;
+    const projects = parsed.projects.map(parseProject);
+    if (projects.some((project) => project === null)) return null;
+    const sandbox = parsed.sandbox;
+    if (!isRecord(sandbox) || typeof sandbox.confines !== 'boolean' || typeof sandbox.detail !== 'string') return null;
+    return { v: 1, type: 'console.projects', projects: projects as ConsoleProject[], sandbox: { confines: sandbox.confines, detail: sandbox.detail.slice(0, 500) } };
+  }
   if (parsed.type === 'console.connections') {
     if (!Array.isArray(parsed.connections) || parsed.connections.length > CONSOLE_MAX_HARNESS_CONNECTIONS) return null;
     const connections = parsed.connections.map(parseHarnessConnection);
@@ -172,14 +244,16 @@ export function parseConsoleMessage(json: string): ConsoleMessage | null {
   switch (parsed.type) {
     case 'console.session-start': {
       if (typeof parsed.consentedAt !== 'number') return null;
+      const place = parsePlace(parsed);
+      if (!place) return null;
       if (parsed.harnessConnection !== undefined) {
         if (typeof parsed.harnessConnection !== 'string' || !SHORT_ID.test(parsed.harnessConnection) || parsed.connection !== undefined || parsed.credential !== undefined) return null;
-        return { v: 1, type: 'console.session-start', sessionId, harnessConnection: parsed.harnessConnection, consentedAt: parsed.consentedAt };
+        return { v: 1, type: 'console.session-start', sessionId, harnessConnection: parsed.harnessConnection, consentedAt: parsed.consentedAt, ...place };
       }
       const connection = parseConnection(parsed.connection);
       if (!connection || typeof parsed.consentedAt !== 'number') return null;
       if (parsed.credential !== undefined && (typeof parsed.credential !== 'string' || parsed.credential.length > 4096)) return null;
-      return { v: 1, type: 'console.session-start', sessionId, connection, consentedAt: parsed.consentedAt, ...(typeof parsed.credential === 'string' ? { credential: parsed.credential } : {}) };
+      return { v: 1, type: 'console.session-start', sessionId, connection, consentedAt: parsed.consentedAt, ...(typeof parsed.credential === 'string' ? { credential: parsed.credential } : {}), ...place };
     }
     case 'console.prompt':
       if (typeof parsed.promptId !== 'string' || !SHORT_ID.test(parsed.promptId)) return null;

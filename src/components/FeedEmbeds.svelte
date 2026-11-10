@@ -5,6 +5,7 @@
   import ProfileEmbed from './ProfileEmbed.svelte';
   import ResourceEmbed from './ResourceEmbed.svelte';
   import {
+    feedAddressReference,
     feedEventReference,
     MAX_INLINE_EVENT_DEPTH,
     isInlineDepthExhausted,
@@ -70,6 +71,21 @@
         <ResourceEmbed source={embed.value} mediaType={embed.mediaType} {loadResources} />
       {:else if embed.type === 'resource'}
         <ResourceEmbed source={embed.value} mediaType="image" {loadResources} />
+      {:else if embed.type === 'address' && canRenderNestedEvents && feedAddressReference(event, embed)}
+        {@const address = feedAddressReference(event, embed)!}
+        <EventEmbed
+          id={address.id}
+          label={address.kind === 35129 ? 'shared app' : 'linked item'}
+          referenceSource={address.source}
+          referenceAuthor={address.author}
+          referenceKind={address.kind}
+          referenceRelays={normalizeRelayHints([...address.relays, ...inheritedRelays])}
+          {profiles}
+          {profileLabel}
+          depth={depth + 1}
+          {maxDepth}
+          {loadResources}
+        />
       {:else}
         <div class="address-embed">
           <span>address</span>

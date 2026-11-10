@@ -9,6 +9,7 @@ import {
   parseNoteContent,
   type NoteContentBlock,
 } from '@hyprgate/utils';
+import * as nip19 from 'nostr-tools/nip19';
 import { normalizeRelayHints, relayHintsForEvent } from './event-relay-hints';
 import { previewContent, replyContextForEvent, replyTargetPubkey } from './note-presentation';
 import { reactionPresentation, reactionTarget } from './reaction-presentation';
@@ -17,6 +18,7 @@ export const KIND_COMMENT = 1111;
 export const MAX_INLINE_EVENT_DEPTH = 2;
 
 export type FeedEventContentReference = Extract<NoteContentBlock, { type: 'event' }>;
+export type FeedAddressContentReference = Extract<NoteContentBlock, { type: 'address' }>;
 
 export interface FeedEventReference {
   id: string;
@@ -86,6 +88,34 @@ export function feedEventReference(
     relays: normalizeRelayHints([
       ...(reference.relays ?? []),
       ...matchingReferenceTags.map((tag) => tag[2] ?? ''),
+      ...relayHintsForEvent(event),
+    ]),
+  };
+}
+
+/**
+ * An `nostr:naddr` in note content: the coordinate plus the relays the naddr
+ * and the note's own `a` tags name, so the embed can fetch the addressable event.
+ */
+export function feedAddressReference(
+  event: NostrEvent,
+  reference: FeedAddressContentReference,
+): FeedEventReference & { kind: number; author: string } | null {
+  const match = /^(\d+):([0-9a-f]{64}):(.+)$/.exec(reference.value);
+  if (!match) return null;
+  let encodedRelays: string[] = [];
+  try {
+    const decoded = nip19.decode(reference.source.replace(/^nostr:/i, ''));
+    if (decoded.type === 'naddr') encodedRelays = decoded.data.relays ?? [];
+  } catch { /* the coordinate alone is still usable */ }
+  return {
+    id: reference.value,
+    source: reference.source,
+    kind: Number(match[1]),
+    author: match[2]!,
+    relays: normalizeRelayHints([
+      ...encodedRelays,
+      ...event.tags.filter((tag) => tag[0] === 'a' && tag[1] === reference.value).map((tag) => tag[2] ?? ''),
       ...relayHintsForEvent(event),
     ]),
   };

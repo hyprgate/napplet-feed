@@ -1,5 +1,6 @@
 import type { NostrEvent } from '@hyprgate/types';
 import {
+  type VerifiedBlobLoader,
   fetchVerifiedBlossomBlob,
   isSha256Hex,
   isValidBlossomOrigin,
@@ -101,18 +102,23 @@ const cache = new Map<string, Promise<string | null>>();
  * before the URL is returned. Unusable media resolves to null and must not block
  * other media or app discovery.
  */
-export function verifiedAppMedia(media: Nip5dMediaDeclaration): Promise<string | null> {
+export interface VerifiedAppMediaOptions {
+  /** Sandboxed apps fetch through NAP-RESOURCE; verification stays the same. */
+  loadBytes?: VerifiedBlobLoader;
+}
+
+export function verifiedAppMedia(media: Nip5dMediaDeclaration, options: VerifiedAppMediaOptions = {}): Promise<string | null> {
   const exact = media.exactDeclaration ? `:exact:${media.size ?? ''}:${media.width ?? ''}x${media.height ?? ''}` : '';
   const key = `${media.kind}:${media.hash}:${media.mimeType ?? ''}:${media.servers.join(',')}${exact}`;
   const cached = cache.get(key);
   if (cached) return cached;
-  const result = fetchVerifiedMedia(media);
+  const result = fetchVerifiedMedia(media, options);
   if (cache.size >= 96) cache.delete(cache.keys().next().value!);
   cache.set(key, result);
   return result;
 }
 
-async function fetchVerifiedMedia(media: Nip5dMediaDeclaration): Promise<string | null> {
+async function fetchVerifiedMedia(media: Nip5dMediaDeclaration, options: VerifiedAppMediaOptions): Promise<string | null> {
   const video = media.kind === 'preview';
   const limit = video ? MAX_PREVIEW_BYTES : MAX_SCREENSHOT_BYTES;
   if (media.exactDeclaration && (video || !media.size || !media.width || !media.height || media.size > limit)) return null;
@@ -122,6 +128,7 @@ async function fetchVerifiedMedia(media: Nip5dMediaDeclaration): Promise<string 
     ...(media.mimeType ? { mimeType: media.mimeType } : {}),
     accept: video ? VERIFIED_VIDEO_FORMATS : VERIFIED_IMAGE_FORMATS,
     maxBytes: media.exactDeclaration ? media.size! : limit,
+    ...(options.loadBytes ? { loadBytes: options.loadBytes } : {}),
   });
   if (!blob || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return null;
   if (media.exactDeclaration && blob.bytes.byteLength !== media.size) return null;

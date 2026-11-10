@@ -1,5 +1,6 @@
 import { resourceBytes, resourceBytesMany } from '@napplet/nap/resource';
 import type { ResourceBytesErrorItem, ResourceBytesItem } from '@napplet/nap/resource';
+import type { VerifiedBlobLoader } from './verified-blossom-blob.js';
 
 export interface ResourceObjectUrlSubscription {
   close(): void;
@@ -786,3 +787,13 @@ export function resourceBackgroundImage(
     },
   };
 }
+
+/**
+ * Fetch content-addressed bytes through NAP-RESOURCE for sandboxed apps. Callers
+ * hand this to the verified Blossom helpers, which check size, hash and format.
+ */
+export const resourceBlobLoader: VerifiedBlobLoader = async (url, maxBytes) => {
+  const blob = await resourceBytes(url);
+  if (blob.size > maxBytes) return null;
+  return new Uint8Array(await blob.arrayBuffer());
+};

@@ -75,6 +75,37 @@ Focused coverage lives in `src/components/feed-reactions.test.ts` and
 `src/lib/reaction-presentation.test.ts`; the parent repository's
 `e2e/feed-reactions.spec.ts` supplies rendered browser proofs.
 
+## App cards
+
+A note that references a NIP-5D app manifest (`nostr:naddr` for a kind-35129
+named app, `nostr:nevent` for a 15129 root app or 5129 snapshot) renders as an
+app card. The card verifies the manifest signature and shows:
+
+- the author's first `screenshot`, fetched by hash from the declared Blossom
+  servers through NAP-RESOURCE and verified before display; if the author
+  shipped none, a trusted [Napshot](https://github.com/napplet/napshot) capture
+  labelled for that exact manifest revision, marked "Automated preview";
+- the app name and the first sentence of its description;
+- required (`R`) and optional (`O`) NAP domains with the App Store's copy.
+
+**Open app** invokes the manifest's own `z`/`i` convention (an `open` action
+when there is one) with a NAP-INTENT `handlerHint` naming the app's 35129
+coordinate. The shell decides what runs: the user's default for that archetype
+wins, an installed hinted app opens directly, and an uninstalled one gets an
+install offer (Install and open / Install only / Not now) in the shell's dialog
+slot. See `apps/shell/src/lib/kehto/intent-hint-install.ts`. A manifest without
+a `z`/`i` contract can't be an intent target, so its card disables Open app
+and says why next to the button.
+
+Focused coverage: `src/components/feed-napplet-embed.test.ts`,
+`packages/utils/src/napplet-embed.test.ts`,
+`apps/shell/src/lib/kehto/intent-hint-install.test.ts`, and the browser proof
+`e2e/feed-napplet-embeds.spec.ts`.
+
+`@napplet/nap` gives up on `intent.invoke` after 30 s, which a reader can exceed
+at the install offer; the card then shows a neutral "Still waiting on the
+shell." Tracked as napplet/web#327 / #511.
+
 ## Intent delivery
 
 The app receives `napplet:feed/open` through the host-injected

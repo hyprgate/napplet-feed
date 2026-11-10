@@ -52,4 +52,25 @@ describe('agent console messages', () => {
       expect(parseConsoleMessage(JSON.stringify({ v: 1, type: 'console.connections', connections: [broken] }))).toBeNull();
     }
   });
+
+  it('lists the harness projects and their controls, never accepting a path from the shell', () => {
+    const request = parseConsoleMessage(JSON.stringify({ v: 1, type: 'console.list-projects' }));
+    expect(request).toEqual({ v: 1, type: 'console.list-projects' });
+    expect(isConsoleShellMessage(request!)).toBe(true);
+    const project = { id: 'hyprgate', name: 'hyprgate', path: '/home/me/code/hyprgate', available: true, write: true, commands: true, network: 'local', env: ['NODE_OPTIONS'] };
+    const sandbox = { confines: true, detail: 'bubblewrap (/usr/bin/bwrap)' };
+    const list = parseConsoleMessage(JSON.stringify({ v: 1, type: 'console.projects', projects: [project], sandbox }));
+    expect(list).toEqual({ v: 1, type: 'console.projects', projects: [project], sandbox });
+    expect(isConsoleShellMessage(list!)).toBe(false);
+    for (const broken of [{ ...project, id: 'Has Caps' }, { ...project, network: 'some' }, { ...project, env: ['A=B'] }, { ...project, write: 'yes' }]) {
+      expect(parseConsoleMessage(JSON.stringify({ v: 1, type: 'console.projects', projects: [broken], sandbox })), JSON.stringify(broken)).toBeNull();
+    }
+    expect(parseConsoleMessage(JSON.stringify({ v: 1, type: 'console.projects', projects: [project] }))).toBeNull();
+
+    const start = parseConsoleMessage(JSON.stringify({ v: 1, type: 'console.session-start', sessionId: 'session-01', harnessConnection: 'chatgpt', consentedAt: 7, project: 'hyprgate', desktopWorkspace: 3 }));
+    expect(start).toEqual({ v: 1, type: 'console.session-start', sessionId: 'session-01', harnessConnection: 'chatgpt', consentedAt: 7, project: 'hyprgate', desktopWorkspace: 3 });
+    for (const place of [{ project: '/home/me/.ssh' }, { project: '../x' }, { desktopWorkspace: 0 }, { desktopWorkspace: 2.5 }]) {
+      expect(parseConsoleMessage(JSON.stringify({ v: 1, type: 'console.session-start', sessionId: 'session-01', connection, consentedAt: 7, ...place })), JSON.stringify(place)).toBeNull();
+    }
+  });
 });

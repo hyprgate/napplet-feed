@@ -5,7 +5,7 @@
   import type { NostrEvent } from '@hyprgate/types';
   import { KIND_REACTION, KIND_REPOST } from '@hyprgate/types';
   import { outbox } from '@napplet/sdk';
-  import { createNoteViewerOpenPayload, pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
+  import { createNoteViewerOpenPayload, parseVerifiedNappletEmbed, pubkeyColorStyle, resourceImageBatch as resourceImage } from '@hyprgate/utils';
   import { isFeedRenderableEvent, isInlineDepthExhausted, MAX_INLINE_EVENT_DEPTH } from '../lib/rendering-fallbacks';
   import {
     createFeedNoteIntentRequestFromPayload,
@@ -21,6 +21,7 @@
   } from '../lib/profile-hydration-context';
   import ExpandableNoteContent from './ExpandableNoteContent.svelte';
   import FeedEmbeds from './FeedEmbeds.svelte';
+  import NappletEmbed from './NappletEmbed.svelte';
   import RepostContent from './RepostContent.svelte';
   import ReactionContent from './ReactionContent.svelte';
   import UnsupportedEventFallback from './UnsupportedEventFallback.svelte';
@@ -90,6 +91,8 @@
   ]));
   let referenceTarget = $derived(referenceSource ? createFeedReferenceOpenPayload(referenceSource)?.target : undefined);
   let addressTarget = $derived(referenceTarget?.type === 'address' ? referenceTarget : undefined);
+  // NIP-5D app manifests (35129 named, 15129 root, 5129 snapshot) render as app cards.
+  let nappletEmbed = $derived(event ? parseVerifiedNappletEmbed(event) : null);
   let addressablePreview = $derived(event && event.kind >= 30000 && event.kind < 40000);
   let title = $derived(event?.tags.find((tag) => tag[0] === 'title' || tag[0] === 'name')?.[1]);
   let summary = $derived(event?.tags.find((tag) => tag[0] === 'summary')?.[1]);
@@ -161,10 +164,13 @@
     let disposed = false;
     void (async () => {
       try {
-        let result = await outbox.getEvent(id, {
-          ...(referenceAuthor ? { author: referenceAuthor } : {}),
-          ...(relayHints.length > 0 ? { relays: relayHints } : {}),
-        });
+        // An naddr has no event id to look up; go straight to its exact coordinate query.
+        let result: Awaited<ReturnType<typeof outbox.getEvent>> = /^[0-9a-f]{64}$/i.test(id)
+          ? await outbox.getEvent(id, {
+            ...(referenceAuthor ? { author: referenceAuthor } : {}),
+            ...(relayHints.length > 0 ? { relays: relayHints } : {}),
+          })
+          : {};
         if (disposed) return;
         if (!result.result?.event && addressTarget) {
           const addressResult = await outbox.query({
@@ -229,6 +235,8 @@
         {:else}
           <div class="depth-limit" data-feed-inline-depth-limit>Nested note limit reached.</div>
         {/if}
+      {:else if nappletEmbed}
+        <NappletEmbed embed={nappletEmbed} relays={relayHints} {loadResources} />
       {:else if addressablePreview}
         {#if title}<strong class="body" data-feed-embed-title>{title}</strong>{/if}
         {#if summary}<span class="body" data-feed-embed-summary>{summary}</span>{/if}

@@ -22,7 +22,15 @@ export interface VerifiedBlobRequest {
   maxBytes: number;
   /** Per-server deadline covering the request and the body read. */
   timeoutMs?: number;
+  /**
+   * Byte loader for runtimes without direct network access. Sandboxed apps pass
+   * a NAP-RESOURCE fetch; the digest, size and format checks still run here.
+   */
+  loadBytes?: VerifiedBlobLoader;
 }
+
+/** Load one blob URL, or null when this server cannot supply it. */
+export type VerifiedBlobLoader = (url: string, maxBytes: number, signal: AbortSignal) => Promise<Uint8Array | null>;
 
 const DEFAULT_BLOB_TIMEOUT_MS = 20_000;
 
@@ -61,12 +69,9 @@ export async function fetchVerifiedBlossomBlob(request: VerifiedBlobRequest): Pr
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), request.timeoutMs ?? DEFAULT_BLOB_TIMEOUT_MS);
     try {
-      const response = await fetch(`${server.replace(/\/$/, '')}/${request.hash}`, {
-        credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', signal: controller.signal,
-      });
-      if (!response.ok || Number(response.headers.get('content-length') ?? 0) > request.maxBytes) continue;
-      const bytes = await readBoundedBytes(response, request.maxBytes);
-      if (!bytes?.length) continue;
+      const url = `${server.replace(/\/$/, '')}/${request.hash}`;
+      const bytes = await (request.loadBytes ?? fetchBoundedBytes)(url, request.maxBytes, controller.signal);
+      if (!bytes?.length || bytes.length > request.maxBytes) continue;
       const format = sniffBlobFormat(bytes);
       if (!format || !request.accept.includes(format)) continue;
       if (request.mimeType && request.mimeType !== format) continue;
@@ -91,6 +96,14 @@ export function bytesToDataUrl(bytes: Uint8Array, format: string): string {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
   }
   return `data:${format};base64,${btoa(binary)}`;
+}
+
+async function fetchBoundedBytes(url: string, maxBytes: number, signal: AbortSignal): Promise<Uint8Array | null> {
+  const response = await fetch(url, {
+    credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', signal,
+  });
+  if (!response.ok || Number(response.headers.get('content-length') ?? 0) > maxBytes) return null;
+  return readBoundedBytes(response, maxBytes);
 }
 
 async function readBoundedBytes(response: Response, maxBytes: number): Promise<Uint8Array | null> {

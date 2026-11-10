@@ -125,4 +125,23 @@ describe('verifiedAppMedia exact declarations', () => {
     })).resolves.toMatchObject({ format: 'image/png' });
     expect(requests).toEqual([`https://slow.example/${REAL_HASH}`, `https://good.example/${REAL_HASH}`]);
   });
+
+  it('routes bytes through an injected loader for sandboxed apps and still verifies them', async () => {
+    const loaded: string[] = [];
+    const loadBytes = async (url: string) => {
+      loaded.push(url);
+      return url.startsWith('https://bad.example/') ? new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0]) : realPng.slice();
+    };
+    await expect(verifiedAppMedia(exact({ servers: ['https://bad.example', 'https://loader.example'] }), { loadBytes }))
+      .resolves.toMatch(/^blob:/);
+    expect(loaded).toEqual([`https://bad.example/${REAL_HASH}`, `https://loader.example/${REAL_HASH}`]);
+    expect(requests).toEqual([]);
+  });
+
+  it('rejects loader bytes larger than the request allows', async () => {
+    await expect(fetchVerifiedBlossomBlob({
+      hash: REAL_HASH, servers: ['https://good.example'], accept: ['image/png'], maxBytes: 4,
+      loadBytes: async () => realPng.slice(),
+    })).resolves.toBeNull();
+  });
 });

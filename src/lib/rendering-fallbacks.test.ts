@@ -4,6 +4,7 @@ import { parseNoteContent } from '@hyprgate/utils';
 import * as nip19 from 'nostr-tools/nip19';
 import { rememberEventRelayHints } from './event-relay-hints';
 import {
+  feedAddressReference,
   collectFeedProfilePubkeys,
   feedEventReference,
   isFeedRenderableEvent,
@@ -127,5 +128,31 @@ describe('feed rendering fallback helpers', () => {
       embedded.pubkey,
       quotedAuthor,
     ]));
+  });
+});
+
+describe('Feature: naddr references in note content', () => {
+  const author = 'a'.repeat(64);
+  const naddr = nip19.naddrEncode({ kind: 35129, pubkey: author, identifier: 'sketch-pad', relays: ['wss://hint.example/'] });
+  const note: NostrEvent = {
+    id: 'f'.repeat(64), pubkey: 'b'.repeat(64), created_at: 1, kind: 1, sig: 's'.repeat(128),
+    content: `Try it nostr:${naddr}`,
+    tags: [['a', `35129:${author}:sketch-pad`, 'wss://tag.example/']],
+  };
+
+  it('Given an app naddr in a note When it is resolved Then the embed gets its coordinate, author, kind and every relay hint', () => {
+    const block = parseNoteContent(note.content).find((item) => item.type === 'address');
+    if (block?.type !== 'address') throw new Error('expected an address block');
+    expect(feedAddressReference(note, block)).toEqual({
+      id: `35129:${author}:sketch-pad`,
+      source: `nostr:${naddr}`,
+      kind: 35129,
+      author,
+      relays: ['wss://hint.example/', 'wss://tag.example/'],
+    });
+  });
+
+  it('Given a malformed coordinate When it is resolved Then no embed is attempted', () => {
+    expect(feedAddressReference(note, { type: 'address', value: 'not-a-coordinate', source: 'nostr:x' })).toBeNull();
   });
 });
